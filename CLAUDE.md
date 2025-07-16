@@ -281,3 +281,59 @@ message RemoteCallRequest {
 - TLS 1.3 mandatory for production use
 - Client and server must share identical API module version
 - All distributed methods must be async throws
+
+## Testing Strategy
+
+### Test Development Approach
+
+1. **Incremental Testing**: Implement tests one at a time, completing each test fully before moving to the next
+2. **Test-First Analysis**: When tests fail, analyze whether the issue is in the test implementation or the actual code
+3. **Structural Analysis**: Consider the overall architecture and design patterns when debugging test failures
+4. **Swift Testing Framework**: Use Swift Testing with async/await support for modern testing patterns
+
+### Test Structure
+
+```
+Tests/
+├── ActorEdgeTests/
+│   ├── Unit/
+│   │   ├── ActorEdgeSystemTests.swift
+│   │   ├── ActorBuilderTests.swift
+│   │   ├── SerializationTests.swift
+│   │   └── TransportTests.swift
+│   ├── Integration/
+│   │   ├── ServerClientTests.swift
+│   │   ├── DistributedActorTests.swift
+│   │   └── EndToEndTests.swift
+│   ├── Performance/
+│   │   ├── ThroughputTests.swift
+│   │   └── LatencyTests.swift
+│   └── Mocks/
+│       ├── MockActorTransport.swift
+│       └── MockGRPCClient.swift
+└── SampleTests/
+    └── ChatTests.swift
+```
+
+### Test Categories
+
+1. **Unit Tests**: Core component functionality in isolation
+2. **Integration Tests**: Component interaction and communication
+3. **Performance Tests**: Throughput, latency, and memory usage
+4. **End-to-End Tests**: Complete workflow validation
+
+### Testing Principles
+
+- Use `@Test` and `@Suite` from Swift Testing framework
+- Leverage `async/await` for distributed actor testing
+- Use `confirmation()` API for asynchronous event testing
+- Apply `@Suite(.serialized)` for shared state tests
+- Implement dependency injection for mocking
+- Maintain test isolation with independent actor systems
+
+### Commit Message Guidelines
+
+- Write clear, concise commit messages describing changes
+- Focus on technical implementation details
+- Do not include promotional content or advertising
+- Keep messages professional and informative
