@@ -47,9 +47,12 @@ public protocol Chat: DistributedActor where ActorSystem == ActorEdgeSystem {
 // Server module
 @main
 struct ChatServer: Server, Chat {
-    // Server configuration
-    var port: Int { 9000 }
-    var tls: TLSConfiguration? { .makeServerTLS() }
+    init() {}  // Required by Server protocol
+    
+    // Use default port 8000 and host 127.0.0.1
+    // Override only if needed:
+    // var port: Int { 9000 }
+    // var host: String { "0.0.0.0" }  // For external access
     
     // Business logic
     distributed func send(_ text: String) async throws {
@@ -76,11 +79,14 @@ The `Server` protocol provides declarative configuration through computed proper
 
 ```swift
 public protocol Server {
+    // Required initialization
+    init()
+    
     // Required configuration
     var port: Int { get }
-    var host: String { get }
     
     // Optional configuration with defaults
+    var host: String { get }
     var tls: TLSConfiguration? { get }
     var middleware: [any ServerMiddleware] { get }
     var maxConnections: Int { get }
@@ -89,7 +95,8 @@ public protocol Server {
 
 // Default implementations provided
 extension Server {
-    var host: String { "0.0.0.0" }
+    var port: Int { 8000 }              // Default port like Deno
+    var host: String { "127.0.0.1" }    // Secure default: localhost only
     var tls: TLSConfiguration? { nil }
     var middleware: [any ServerMiddleware] { [] }
     var maxConnections: Int { 1000 }

@@ -4,7 +4,7 @@ import Foundation
 /// Handler for distributed actor method results
 @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 public final class ActorEdgeResultHandler: DistributedTargetInvocationResultHandler {
-    public typealias SerializationRequirement = ActorEdgeSerializable
+    public typealias SerializationRequirement = Codable & Sendable
     
     private let encoder = JSONEncoder()
     

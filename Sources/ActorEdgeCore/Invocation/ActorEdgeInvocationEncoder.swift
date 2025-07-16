@@ -4,7 +4,7 @@ import Foundation
 /// Encoder for distributed actor method invocations
 @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
-    public typealias SerializationRequirement = ActorEdgeSerializable
+    public typealias SerializationRequirement = Codable & Sendable
     
     private var encoder: JSONEncoder
     private var arguments: [Data] = []

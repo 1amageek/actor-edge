@@ -1,0 +1,10 @@
+{
+  "protocPath": "/opt/homebrew/bin/protoc",
+  "invocations": [
+    {
+      "protoFiles": ["distributed_actor.proto"],
+      "visibility": "Public",
+      "fileNaming": "FullPath"
+    }
+  ]
+}

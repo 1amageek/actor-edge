@@ -4,7 +4,7 @@ import Foundation
 /// Decoder for distributed actor method invocations
 @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
-    public typealias SerializationRequirement = ActorEdgeSerializable
+    public typealias SerializationRequirement = Codable & Sendable
     
     private var decoder: JSONDecoder
     private var arguments: [Data]
@@ -62,7 +62,7 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
         let data = arguments[currentArgumentIndex]
         currentArgumentIndex += 1
         
-        // Decode the argument directly since it conforms to ActorEdgeSerializable (which includes Codable)
+        // Decode the argument directly since it conforms to Codable & Sendable
         return try decoder.decode(Argument.self, from: data)
     }
     

@@ -64,6 +64,10 @@ let package = Package(
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Tracing", package: "swift-distributed-tracing"),
                 .product(name: "ServiceContextModule", package: "swift-service-context"),
+            ],
+            exclude: [],
+            plugins: [
+                .plugin(name: "SwiftProtobufPlugin", package: "swift-protobuf")
             ]
         ),
         

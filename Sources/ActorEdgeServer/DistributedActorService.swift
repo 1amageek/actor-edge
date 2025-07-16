@@ -80,14 +80,8 @@ public final class DistributedActorService: RegistrableRPCService {
             let actorID = ActorEdgeID(message.actorID)
             
             // Find actor in the system
-            guard let actor = await system.findActor(id: actorID) as? (any DistributedActor) else {
+            guard let actor = await system.findActor(id: actorID) else {
                 logger.warning("Actor not found", metadata: ["actorID": "\(actorID)"])
-                
-                let errorEnvelope = Actoredge_ErrorEnvelope.with {
-                    $0.typeURL = String(reflecting: ActorEdgeError.self)
-                    $0.data = try! JSONEncoder().encode(ActorEdgeError.actorNotFound(actorID))
-                    $0.description_p = "Actor not found: \(actorID)"
-                }
                 
                 return StreamingServerResponse(
                     accepted: .failure(RPCError(
@@ -107,10 +101,16 @@ public final class DistributedActorService: RegistrableRPCService {
             // Create result handler
             let resultHandler = ActorEdgeResultHandler()
             
-            // For now, we'll return empty data as we need to implement
-            // the actual distributed method invocation
-            // TODO: Implement proper distributed method invocation
-            let resultData = Data()
+            // Create RemoteCallTarget from method name
+            let target = RemoteCallTarget(message.method)
+            
+            // Execute the distributed method using the actor system
+            let resultData: Data = try await system.executeDistributedTarget(
+                on: actor,
+                target: target,
+                invocationDecoder: &decoder,
+                handler: resultHandler
+            )
             
             logger.debug("Remote call completed successfully", metadata: [
                 "actorID": "\(actorID)",
@@ -130,9 +130,6 @@ public final class DistributedActorService: RegistrableRPCService {
                 "method": "\(message.method)",
                 "error": "\(error)"
             ])
-            
-            // Serialize error to ErrorEnvelope
-            let errorEnvelope = createErrorEnvelope(from: error)
             
             return StreamingServerResponse(
                 accepted: .failure(RPCError(
@@ -197,9 +194,10 @@ public final class DistributedActorService: RegistrableRPCService {
 @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 extension ActorEdgeSystem {
     /// Find an actor by ID in the system
-    /// This is a server-side method that needs to be implemented
     func findActor(id: ActorEdgeID) async -> (any DistributedActor)? {
-        // TODO: Implement actor registry
-        return nil
+        guard isServer, let registry = registry else {
+            return nil
+        }
+        return await registry.find(id: id)
     }
 }

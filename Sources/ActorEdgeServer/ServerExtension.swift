@@ -22,11 +22,21 @@ public extension Server {
         
         logger.info("Starting ActorEdge server...")
         
+        // Create server instance
+        let server = Self()
+        
         // Create actor system
         let system = ActorEdgeSystem()
         
-        // Create server instance
-        let server = Self()
+        // Get server's actors with the system
+        let actors = server.actors(actorSystem: system)
+        
+        // Register server's actors with the system
+        for (index, actor) in actors.enumerated() {
+            let actorID = ActorEdgeID("actor-\(index)")
+            await system.registerActor(actor, id: actorID)
+            logger.info("Registered actor", metadata: ["id": "\(actorID)", "type": "\(type(of: actor))"])
+        }
         
         // Configure transport security
         let transportSecurity: HTTP2ServerTransport.Posix.TransportSecurity
@@ -76,10 +86,12 @@ public extension Server {
 
 @available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 extension ActorEdgeSystem {
-    /// Register a server instance with the system
-    func registerServer<S: Server>(_ server: S) async {
-        // TODO: Implement server registry for distributed actors
-        // For now, this is a placeholder
+    /// Register any distributed actor with the system
+    func registerActor(_ actor: any DistributedActor, id: ActorEdgeID) async {
+        guard let registry = registry else {
+            return
+        }
+        await registry.register(actor, id: id)
     }
 }
 
