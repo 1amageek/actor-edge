@@ -6,7 +6,7 @@ import Foundation
 import Logging
 
 /// Chat server implementation
-public distributed actor ChatServer: Chat {
+public distributed actor ChatActor: Chat {
     public typealias ActorSystem = ActorEdgeSystem
     
     private let logger = Logger(label: "ChatServer")
@@ -54,19 +54,13 @@ public distributed actor ChatServer: Chat {
 // MARK: - Server Main
 
 @main
-public struct ChatServerMain: Server {
-    public init() {}
+struct ChatServer: Server {
     
-    // MARK: - Actor Configuration
+    var port: Int { 8000 }
     
-    @ActorBuilder
-    public func actors(actorSystem: ActorEdgeSystem) -> [any DistributedActor] {
-        ChatServer(actorSystem: actorSystem)
-        // PaymentServer(actorSystem: actorSystem)  // Future actors
+    var host: String { "127.0.0.1" }
+  
+    func actors(actorSystem: ActorEdgeSystem) -> [any DistributedActor] {
+        ChatActor(actorSystem: actorSystem)
     }
-    
-    // MARK: - Server Configuration
-    
-    public var port: Int { 8000 }
-    public var host: String { "127.0.0.1" }
 }
