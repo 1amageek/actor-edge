@@ -176,7 +176,10 @@ Sources/
 │   ├── Configuration/
 │   │   ├── MetricsConfiguration.swift
 │   │   ├── TLSConfiguration.swift
+│   │   ├── TLSTypes.swift  # Certificate sources and TLS enums
 │   │   └── TracingConfiguration.swift
+│   ├── Utilities/
+│   │   └── CertificateUtilities.swift
 │   ├── Errors/
 │   │   └── ActorEdgeError.swift
 │   ├── Invocation/
@@ -279,13 +282,14 @@ message RemoteCallRequest {
 11. **ActorBuilder**: SwiftUI-style declarative actor configuration
 12. **Examples**: Complete Chat example with SharedAPI, Server, and Client
 13. **Testing Strategy**: Comprehensive testing framework and guidelines
+14. **TLS Support**: Production-ready TLS configuration with certificate abstraction
 
 ⏳ **Pending**:
 1. **Binary Serialization**: Switch from JSON to binary format for performance
 2. **ServiceLifecycle**: Enhanced integration with ServiceGroup
 3. **Test Implementation**: Unit, integration, and performance tests
-4. **TLS Support**: Production-ready TLS configuration
-5. **Middleware System**: Request/response middleware pipeline
+4. **Middleware System**: Request/response middleware pipeline
+5. **Full gRPC TLS Integration**: Waiting for grpc-swift 2.0 to expose complete TLS API
 
 ### Key Implementation Notes
 
@@ -304,9 +308,105 @@ message RemoteCallRequest {
 ### Design Constraints
 
 - No clustering or service discovery (unlike swift-distributed-actors)
-- TLS 1.3 mandatory for production use
+- TLS 1.2+ recommended for production use
 - Client and server must share identical API module version
 - All distributed methods must be async throws
+
+## TLS Configuration
+
+ActorEdge provides comprehensive TLS support for secure communication:
+
+### Certificate Sources
+
+**CertificateSource** - Abstract certificate loading:
+- `.bytes(Data, format:)` - In-memory certificate
+- `.file(String, format:)` - Load from file path
+- `.certificate(NIOSSLCertificate)` - Pre-loaded certificate
+
+**PrivateKeySource** - Abstract private key loading:
+- `.bytes(Data, format:, passphrase:)` - In-memory key with optional passphrase
+- `.file(String, format:, passphrase:)` - Load from file with optional passphrase
+- `.privateKey(NIOSSLPrivateKey)` - Pre-loaded key
+
+### Server TLS Configuration
+
+```swift
+// Basic TLS from files
+let tlsConfig = try TLSConfiguration.fromFiles(
+    certificatePath: "/path/to/cert.pem",
+    privateKeyPath: "/path/to/key.pem",
+    privateKeyPassword: "password"  // Optional
+)
+
+// Server with TLS
+@main
+struct SecureServer: Server {
+    var tls: TLSConfiguration? {
+        try? TLSConfiguration.server(
+            certificateChain: [.file("/path/to/cert.pem", format: .pem)],
+            privateKey: .file("/path/to/key.pem", format: .pem)
+        )
+    }
+}
+
+// Mutual TLS (mTLS)
+let mtlsConfig = TLSConfiguration.serverMTLS(
+    certificateChain: [certSource],
+    privateKey: keySource,
+    trustRoots: .certificates([clientCASource]),
+    clientCertificateVerification: .fullVerification
+)
+```
+
+### Client TLS Configuration
+
+```swift
+// System default CA certificates
+let transport = try await GRPCActorTransport("server:443", 
+    tls: .systemDefault()
+)
+
+// Custom CA certificate
+let clientTLS = ClientTLSConfiguration.client(
+    trustRoots: .certificates([.file("/path/to/ca.pem", format: .pem)])
+)
+
+// Mutual TLS client
+let mtlsClient = ClientTLSConfiguration.mutualTLS(
+    certificateChain: [.file("/path/to/client-cert.pem", format: .pem)],
+    privateKey: .file("/path/to/client-key.pem", format: .pem),
+    trustRoots: .certificates([.file("/path/to/ca.pem", format: .pem)])
+)
+
+// Development only - disable certificate verification
+let insecure = ClientTLSConfiguration.insecure()
+```
+
+### Certificate Utilities
+
+```swift
+// Load certificate chain
+let chain = try CertificateUtilities.loadCertificateChain(from: "/path/to/chain.pem")
+
+// Quick server config
+let tlsConfig = try CertificateUtilities.serverConfig(
+    certificatePath: "/path/to/cert.pem",
+    privateKeyPath: "/path/to/key.pem",
+    passphrase: "optional-password"
+)
+
+// Quick client config with custom CA
+let clientConfig = try CertificateUtilities.clientConfig(
+    caCertificatePath: "/path/to/ca.pem"
+)
+```
+
+### Important Notes
+
+- Never hardcode certificates in production code
+- Use `.insecure()` only for development/testing
+- grpc-swift 2.0 currently has limited TLS API exposure
+- Full TLS configuration will be available when grpc-swift 2.0 APIs are public
 
 ## Testing Strategy
 

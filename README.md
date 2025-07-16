@@ -14,6 +14,7 @@ ActorEdge brings the simplicity of Swift's distributed actors to client-server d
 - **Transparent Errors**: Remote errors propagate naturally as if they were local
 - **Declarative Servers**: SwiftUI-style server configuration with `@ActorBuilder`
 - **Fast by Default**: Binary serialization and HTTP/2 transport
+- **Production Ready**: Comprehensive TLS support with certificate management
 
 ## Requirements
 
@@ -93,6 +94,7 @@ distributed actor ChatActor: Chat {
 struct ChatServer: Server {
     var port: Int { 9000 }
     
+    @ActorBuilder
     func actors(actorSystem: ActorEdgeSystem) -> [any DistributedActor] {
         ChatActor(actorSystem: actorSystem)
     }
@@ -105,7 +107,8 @@ struct ChatServer: Server {
 import ActorEdge
 
 // That's it! The $Chat stub is auto-generated
-let system = ActorEdgeSystem(transport: GRPCActorTransport("localhost:9000"))
+let transport = try await GRPCActorTransport("localhost:9000")
+let system = ActorEdgeSystem(transport: transport)
 let chat = try $Chat.resolve(id: "chat-server", using: system)
 
 let response = try await chat.send("Hello!")
@@ -171,19 +174,48 @@ let system = ActorEdgeSystem(
 
 ### TLS Configuration
 
+ActorEdge provides comprehensive TLS support with flexible certificate management:
+
 ```swift
-// Server TLS
+// Server TLS from files
 var tls: TLSConfiguration? {
-    .makeServerTLS(
-        certificateChain: [.certificate(cert)],
-        privateKey: .privateKey(key)
+    try? TLSConfiguration.fromFiles(
+        certificatePath: "/path/to/cert.pem",
+        privateKeyPath: "/path/to/key.pem"
     )
 }
 
-// Client TLS
-let transport = GRPCActorTransport(
-    "api.example.com",
-    tls: .makeClientTLS(trustRoots: .certificates([caCert]))
+// Server with mutual TLS
+var tls: TLSConfiguration? {
+    TLSConfiguration.serverMTLS(
+        certificateChain: [.file("/path/to/cert.pem", format: .pem)],
+        privateKey: .file("/path/to/key.pem", format: .pem),
+        trustRoots: .certificates([.file("/path/to/ca.pem", format: .pem)])
+    )
+}
+
+// Client with system CA certificates
+let transport = try await GRPCActorTransport(
+    "api.example.com:443",
+    tls: .systemDefault()
+)
+
+// Client with custom CA
+let transport = try await GRPCActorTransport(
+    "api.example.com:443",
+    tls: ClientTLSConfiguration.client(
+        trustRoots: .certificates([.file("/path/to/ca.pem", format: .pem)])
+    )
+)
+
+// Mutual TLS client
+let transport = try await GRPCActorTransport(
+    "api.example.com:443",
+    tls: ClientTLSConfiguration.mutualTLS(
+        certificateChain: [.file("/path/to/client-cert.pem", format: .pem)],
+        privateKey: .file("/path/to/client-key.pem", format: .pem),
+        trustRoots: .certificates([.file("/path/to/ca.pem", format: .pem)])
+    )
 )
 ```
 

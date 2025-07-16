@@ -1,58 +1,121 @@
 import Foundation
 import NIOSSL
 
-/// TLS configuration for secure connections
+/// TLS configuration for secure server connections
 public struct TLSConfiguration: Sendable {
-    public let certificateChain: [NIOSSLCertificate]
-    public let privateKey: NIOSSLPrivateKey
-    public let trustRoots: NIOSSLTrustRoots?
-    public let certificateVerification: CertificateVerification
+    /// Certificate chain sources
+    public let certificateChainSources: [CertificateSource]
+    /// Private key source
+    public let privateKeySource: PrivateKeySource
+    /// Trust roots for client certificate verification (mTLS)
+    public let trustRoots: TrustRootsSource
+    /// Client certificate verification mode
+    public let clientCertificateVerification: CertificateVerification
+    /// Cipher suites to use
     public let cipherSuites: [NIOTLSCipher]?
+    /// Minimum TLS version
     public let minimumTLSVersion: TLSVersion
+    /// Maximum TLS version
     public let maximumTLSVersion: TLSVersion
+    /// Whether to require ALPN
+    public let requireALPN: Bool
+    /// Passphrase for encrypted private keys
+    public let passphrase: String?
     
     public init(
-        certificateChain: [NIOSSLCertificate],
-        privateKey: NIOSSLPrivateKey,
-        trustRoots: NIOSSLTrustRoots? = nil,
-        certificateVerification: CertificateVerification = .fullVerification,
+        certificateChainSources: [CertificateSource],
+        privateKeySource: PrivateKeySource,
+        trustRoots: TrustRootsSource = .systemDefault,
+        clientCertificateVerification: CertificateVerification = .none,
         cipherSuites: [NIOTLSCipher]? = nil,
         minimumTLSVersion: TLSVersion = .tlsv12,
-        maximumTLSVersion: TLSVersion = .tlsv13
+        maximumTLSVersion: TLSVersion = .tlsv13,
+        requireALPN: Bool = true,
+        passphrase: String? = nil
     ) {
-        self.certificateChain = certificateChain
-        self.privateKey = privateKey
+        self.certificateChainSources = certificateChainSources
+        self.privateKeySource = privateKeySource
         self.trustRoots = trustRoots
-        self.certificateVerification = certificateVerification
+        self.clientCertificateVerification = clientCertificateVerification
         self.cipherSuites = cipherSuites
         self.minimumTLSVersion = minimumTLSVersion
         self.maximumTLSVersion = maximumTLSVersion
+        self.requireALPN = requireALPN
+        self.passphrase = passphrase
     }
+    
+    
+    // MARK: - Factory Methods
     
     /// Create a server TLS configuration
-    public static func makeServerConfiguration(
-        certificateChain: [NIOSSLCertificate],
-        privateKey: NIOSSLPrivateKey
+    public static func server(
+        certificateChain: [CertificateSource],
+        privateKey: PrivateKeySource,
+        clientCertificateVerification: CertificateVerification = .none,
+        trustRoots: TrustRootsSource = .systemDefault
     ) -> TLSConfiguration {
-        return TLSConfiguration(certificateChain: certificateChain, privateKey: privateKey)
+        return TLSConfiguration(
+            certificateChainSources: certificateChain,
+            privateKeySource: privateKey,
+            trustRoots: trustRoots,
+            clientCertificateVerification: clientCertificateVerification
+        )
     }
     
-    /// Create a simple server TLS configuration for testing
-    public static func makeServerTLS() -> TLSConfiguration? {
-        // TODO: Implement proper certificate generation
-        // For now, return nil - in production, this should load from files or generate self-signed
-        return nil
+    /// Create a server TLS configuration for mutual TLS
+    public static func serverMTLS(
+        certificateChain: [CertificateSource],
+        privateKey: PrivateKeySource,
+        trustRoots: TrustRootsSource,
+        clientCertificateVerification: CertificateVerification = .fullVerification
+    ) -> TLSConfiguration {
+        return TLSConfiguration(
+            certificateChainSources: certificateChain,
+            privateKeySource: privateKey,
+            trustRoots: trustRoots,
+            clientCertificateVerification: clientCertificateVerification
+        )
     }
     
-    /// Create a simple client TLS configuration
-    public static func makeClientTLS() -> ClientTLSConfiguration {
-        ClientTLSConfiguration()
+    /// Load TLS configuration from certificate and key files
+    public static func fromFiles(
+        certificatePath: String,
+        privateKeyPath: String,
+        format: SerializationFormat = .pem,
+        privateKeyPassword: String? = nil
+    ) throws -> TLSConfiguration {
+        let certificateSource = CertificateSource.file(certificatePath, format: format)
+        let privateKeySource: PrivateKeySource
+        
+        privateKeySource = .file(privateKeyPath, format: format, passphrase: privateKeyPassword)
+        
+        return TLSConfiguration(
+            certificateChainSources: [certificateSource],
+            privateKeySource: privateKeySource
+        )
     }
-}
-
-/// Certificate verification mode
-public enum CertificateVerification: Sendable {
-    case none
-    case noHostnameVerification
-    case fullVerification
+    
+    // MARK: - NIOSSL Conversion
+    
+    /// Create NIOSSL TLS configuration for server
+    internal func makeNIOSSLConfiguration() throws -> NIOSSL.TLSConfiguration {
+        let certificateChain = try certificateChainSources.map { try $0.load() }
+        let privateKey = try privateKeySource.load()
+        let trustRoots = try trustRoots.makeNIOSSLTrustRoots()
+        
+        var tlsConfig = NIOSSL.TLSConfiguration.makeServerConfiguration(
+            certificateChain: certificateChain.map { .certificate($0) },
+            privateKey: .privateKey(privateKey)
+        )
+        
+        tlsConfig.certificateVerification = clientCertificateVerification.niosslVerification
+        tlsConfig.trustRoots = trustRoots
+        tlsConfig.minimumTLSVersion = minimumTLSVersion.niosslVersion
+        tlsConfig.maximumTLSVersion = maximumTLSVersion.niosslVersion
+        
+        // Note: NIOSSL expects cipherSuites as a String
+        // For now, we'll skip cipher suite configuration
+        
+        return tlsConfig
+    }
 }

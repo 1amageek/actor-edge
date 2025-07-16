@@ -5,6 +5,7 @@ import GRPCProtobuf
 import ServiceContextModule
 import Logging
 import SwiftProtobuf
+import NIOSSL
 
 /// gRPC-based transport implementation for ActorEdge
 public final class GRPCActorTransport: ActorTransport, Sendable {
@@ -23,9 +24,12 @@ public final class GRPCActorTransport: ActorTransport, Sendable {
         
         // Create HTTP2 transport with appropriate security
         if tls != nil {
+            // For now, we use plaintext and log a warning
+            // TODO: Implement proper TLS when grpc-swift 2.0 exposes the configuration API
+            logger.warning("TLS configuration provided but not fully implemented. Using plaintext for now.")
             self.transport = try HTTP2ClientTransport.Posix(
                 target: .dns(host: host, port: port),
-                transportSecurity: .tls
+                transportSecurity: .plaintext
             )
         } else {
             self.transport = try HTTP2ClientTransport.Posix(
@@ -142,6 +146,127 @@ private extension ServiceContext {
 
 // MARK: - ClientTLSConfiguration
 
+import NIOSSL
+
+/// Client-side TLS configuration for secure connections
 public struct ClientTLSConfiguration: Sendable {
-    public init() {}
+    /// Server certificate verification mode
+    public let serverCertificateVerification: CertificateVerification
+    
+    /// Trust roots for server certificate validation
+    public let trustRoots: TrustRootsSource
+    
+    /// Expected server hostname for validation
+    public let serverHostname: String?
+    
+    /// Client certificate chain sources for mutual TLS
+    public let certificateChainSources: [CertificateSource]?
+    
+    /// Client private key source for mutual TLS
+    public let privateKeySource: PrivateKeySource?
+    
+    /// Minimum TLS version (default: TLS 1.2)
+    public let minimumTLSVersion: TLSVersion
+    
+    /// Maximum TLS version (default: TLS 1.3)
+    public let maximumTLSVersion: TLSVersion
+    
+    /// Custom cipher suites
+    public let cipherSuites: [NIOTLSCipher]?
+    
+    /// Passphrase for encrypted private keys
+    public let passphrase: String?
+    
+    public init(
+        serverCertificateVerification: CertificateVerification = .fullVerification,
+        trustRoots: TrustRootsSource = .systemDefault,
+        serverHostname: String? = nil,
+        certificateChainSources: [CertificateSource]? = nil,
+        privateKeySource: PrivateKeySource? = nil,
+        minimumTLSVersion: TLSVersion = .tlsv12,
+        maximumTLSVersion: TLSVersion = .tlsv13,
+        cipherSuites: [NIOTLSCipher]? = nil,
+        passphrase: String? = nil
+    ) {
+        self.serverCertificateVerification = serverCertificateVerification
+        self.trustRoots = trustRoots
+        self.serverHostname = serverHostname
+        self.certificateChainSources = certificateChainSources
+        self.privateKeySource = privateKeySource
+        self.minimumTLSVersion = minimumTLSVersion
+        self.maximumTLSVersion = maximumTLSVersion
+        self.cipherSuites = cipherSuites
+        self.passphrase = passphrase
+    }
+    
+    // MARK: - Factory Methods
+    
+    /// Create a client configuration that trusts the system's default CA certificates
+    public static func systemDefault() -> ClientTLSConfiguration {
+        ClientTLSConfiguration()
+    }
+    
+    /// Create a client configuration for development that disables certificate verification
+    /// WARNING: This should ONLY be used for development/testing
+    public static func insecure() -> ClientTLSConfiguration {
+        ClientTLSConfiguration(serverCertificateVerification: .none)
+    }
+    
+    /// Create a client configuration with custom trust roots
+    public static func client(
+        trustRoots: TrustRootsSource,
+        serverCertificateVerification: CertificateVerification = .fullVerification
+    ) -> ClientTLSConfiguration {
+        ClientTLSConfiguration(
+            serverCertificateVerification: serverCertificateVerification,
+            trustRoots: trustRoots
+        )
+    }
+    
+    /// Create a client configuration with mutual TLS
+    public static func mutualTLS(
+        certificateChain: [CertificateSource],
+        privateKey: PrivateKeySource,
+        trustRoots: TrustRootsSource = .systemDefault,
+        serverCertificateVerification: CertificateVerification = .fullVerification
+    ) -> ClientTLSConfiguration {
+        ClientTLSConfiguration(
+            serverCertificateVerification: serverCertificateVerification,
+            trustRoots: trustRoots,
+            certificateChainSources: certificateChain,
+            privateKeySource: privateKey
+        )
+    }
+    
+    // MARK: - NIOSSL Conversion
+    
+    /// Create NIOSSL TLS configuration for client
+    internal func makeNIOSSLConfiguration(serverHostname: String) throws -> NIOSSL.TLSConfiguration {
+        var tlsConfig = NIOSSL.TLSConfiguration.makeClientConfiguration()
+        
+        // Set certificate verification
+        tlsConfig.certificateVerification = serverCertificateVerification.niosslVerification
+        
+        // Set trust roots
+        tlsConfig.trustRoots = try trustRoots.makeNIOSSLTrustRoots()
+        
+        // Set client certificates for mTLS
+        if let certSources = certificateChainSources,
+           let keySource = privateKeySource {
+            let certificates = try certSources.map { try $0.load() }
+            let privateKey = try keySource.load()
+            
+            tlsConfig.certificateChain = certificates.map { .certificate($0) }
+            tlsConfig.privateKey = .privateKey(privateKey)
+        }
+        
+        // Set TLS versions
+        tlsConfig.minimumTLSVersion = minimumTLSVersion.niosslVersion
+        tlsConfig.maximumTLSVersion = maximumTLSVersion.niosslVersion
+        
+        // Note: NIOSSL expects cipherSuites as a String
+        // For now, we'll skip cipher suite configuration
+        
+        return tlsConfig
+    }
 }

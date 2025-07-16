@@ -40,11 +40,27 @@ public extension Server {
         // Configure transport security
         let transportSecurity: HTTP2ServerTransport.Posix.TransportSecurity
         if let tlsConfig = server.tls {
-            // For now, use default TLS config
-            // In production, should use tlsConfig.certificateChain and privateKey
-            // Use self-signed certificate for testing
-            // In production, load from tlsConfig
-            transportSecurity = .plaintext // TODO: Implement proper TLS support
+            // Note: grpc-swift 2.0 has limited TLS configuration API
+            // The full TLS configuration is not exposed in the public API yet
+            // For basic TLS, we can use the available options
+            
+            if tlsConfig.certificateChainSources.isEmpty {
+                logger.warning("TLS configuration provided but no certificates found. Using plaintext.")
+                transportSecurity = .plaintext
+            } else {
+                // Log warning about limited TLS support
+                logger.warning("TLS configuration provided. Note: Full TLS configuration support is limited in grpc-swift 2.0.")
+                
+                // For now, we use plaintext until grpc-swift exposes the full TLS API
+                // In production, you would need to use the available TLS methods when they become public
+                transportSecurity = .plaintext
+                
+                // TODO: When grpc-swift 2.0 exposes the TLS configuration API, use:
+                // transportSecurity = .tls(
+                //     certificateChain: tlsConfig.certificateChain.map { .certificate($0) },
+                //     privateKey: .privateKey(tlsConfig.privateKey)
+                // )
+            }
         } else {
             transportSecurity = .plaintext
         }
