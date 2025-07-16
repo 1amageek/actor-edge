@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:deepwiki.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(mkdir:*)",
+      "Bash(swift build)",
+      "Bash(chmod:*)",
+      "mcp__deepwiki__read_wiki_structure",
+      "mcp__deepwiki__read_wiki_contents",
+      "mcp__deepwiki__ask_question",
+      "WebFetch(domain:www.swift.org)",
+      "Bash(./generate-grpc.sh:*)",
+      "Bash(protoc-gen-grpc-swift:*)",
+      "Bash(swift package:*)",
+      "Bash(ls:*)"
+    ],
+    "deny": []
+  }
+}
