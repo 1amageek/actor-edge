@@ -12,6 +12,7 @@ public enum ActorEdgeError: Error, Codable, Sendable {
     case remoteError(ErrorEnvelope)
     case invalidResponse
     case missingArgument
+    case invalidFormat(String)
     
     private enum CodingKeys: String, CodingKey {
         case type
@@ -52,6 +53,9 @@ public enum ActorEdgeError: Error, Codable, Sendable {
             self = .invalidResponse
         case "missingArgument":
             self = .missingArgument
+        case "invalidFormat":
+            let message = try container.decode(String.self, forKey: .message)
+            self = .invalidFormat(message)
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .type,
@@ -91,6 +95,9 @@ public enum ActorEdgeError: Error, Codable, Sendable {
             try container.encode("invalidResponse", forKey: .type)
         case .missingArgument:
             try container.encode("missingArgument", forKey: .type)
+        case .invalidFormat(let message):
+            try container.encode("invalidFormat", forKey: .type)
+            try container.encode(message, forKey: .message)
         }
     }
 }

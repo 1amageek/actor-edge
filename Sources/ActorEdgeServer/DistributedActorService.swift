@@ -7,7 +7,6 @@ import SwiftProtobuf
 import Logging
 
 /// gRPC service implementation for distributed actors
-@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 public final class DistributedActorService: RegistrableRPCService {
     private let system: ActorEdgeSystem
     private let logger: Logger
@@ -191,7 +190,6 @@ public final class DistributedActorService: RegistrableRPCService {
 
 // MARK: - ActorEdgeSystem Extensions
 
-@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 extension ActorEdgeSystem {
     /// Find an actor by ID in the system
     func findActor(id: ActorEdgeID) async -> (any DistributedActor)? {

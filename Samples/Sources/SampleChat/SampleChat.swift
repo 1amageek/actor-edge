@@ -5,7 +5,6 @@ import Foundation
 import Logging
 
 /// Combined chat sample that demonstrates both server and client functionality
-@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 @main
 struct SampleChat {
     static func main() async throws {
@@ -82,7 +81,6 @@ struct SampleChat {
 }
 
 /// In-memory chat server for the sample
-@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 distributed actor ChatServer: Chat {
     public typealias ActorSystem = ActorEdgeSystem
     

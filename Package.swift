@@ -6,11 +6,11 @@ import PackageDescription
 let package = Package(
     name: "actor-edge",
     platforms: [
-        .macOS(.v14),
-        .iOS(.v17),
-        .tvOS(.v17),
-        .watchOS(.v10),
-        .visionOS(.v1)
+        .macOS(.v15),
+        .iOS(.v18),
+        .tvOS(.v18),
+        .watchOS(.v11),
+        .visionOS(.v2)
     ],
     products: [
         .library(
@@ -90,7 +90,12 @@ let package = Package(
         // Tests
         .testTarget(
             name: "ActorEdgeTests",
-            dependencies: ["ActorEdge"]
+            dependencies: [
+                "ActorEdge",
+                "ActorEdgeCore",
+                "ActorEdgeServer",
+                "ActorEdgeClient"
+            ]
         ),
     ]
 )

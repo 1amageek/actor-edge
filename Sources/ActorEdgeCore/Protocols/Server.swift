@@ -3,7 +3,6 @@ import Foundation
 import NIOSSL
 
 /// Result builder for creating distributed actors in a declarative way
-@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 @resultBuilder
 public struct ActorBuilder {
     
@@ -61,7 +60,6 @@ public struct ActorBuilder {
 // MARK: - Server Protocol
 
 /// Protocol for defining ActorEdge servers with declarative configuration
-@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 public protocol Server {
     init()
     
@@ -101,7 +99,6 @@ public protocol Server {
 }
 
 // MARK: - Default Implementations
-@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 public extension Server {
     @ActorBuilder
     func actors(actorSystem: ActorEdgeSystem) -> [any DistributedActor] {

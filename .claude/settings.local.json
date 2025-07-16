@@ -14,7 +14,14 @@
       "Bash(./generate-grpc.sh:*)",
       "Bash(protoc-gen-grpc-swift:*)",
       "Bash(swift package:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(mv:*)",
+      "Bash(swift test)",
+      "Bash(swift --version)",
+      "Bash(swift test:*)",
+      "Bash(sed:*)",
+      "Bash(xcrun:*)",
+      "Bash(git add:*)"
     ],
     "deny": []
   }

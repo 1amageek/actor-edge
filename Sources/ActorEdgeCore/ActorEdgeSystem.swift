@@ -4,7 +4,6 @@ import Logging
 import ServiceContextModule
 
 /// The distributed actor system implementation for ActorEdge
-@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 public final class ActorEdgeSystem: DistributedActorSystem {
     public typealias ActorID = ActorEdgeID
     public typealias SerializationRequirement = Codable & Sendable
@@ -88,7 +87,7 @@ public final class ActorEdgeSystem: DistributedActorSystem {
     
     public func remoteCall<Act, Err, Res>(
         on actor: Act,
-        target: RemoteCallTarget,
+        target: Distributed.RemoteCallTarget,
         invocation: inout InvocationEncoder,
         throwing: Err.Type,
         returning: Res.Type
@@ -121,7 +120,7 @@ public final class ActorEdgeSystem: DistributedActorSystem {
     
     public func remoteCallVoid<Act, Err>(
         on actor: Act,
-        target: RemoteCallTarget,
+        target: Distributed.RemoteCallTarget,
         invocation: inout InvocationEncoder,
         throwing: Err.Type
     ) async throws
@@ -149,7 +148,7 @@ public final class ActorEdgeSystem: DistributedActorSystem {
     /// Execute a distributed target on the server side
     public func executeDistributedTarget(
         on actor: any DistributedActor,
-        target: RemoteCallTarget,
+        target: Distributed.RemoteCallTarget,
         invocationDecoder: inout InvocationDecoder,
         handler: ResultHandler
     ) async throws -> Data {

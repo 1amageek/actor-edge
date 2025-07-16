@@ -6,7 +6,6 @@ import Foundation
 import Logging
 
 /// Chat server implementation
-@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 public distributed actor ChatServer: Chat {
     public typealias ActorSystem = ActorEdgeSystem
     
@@ -54,7 +53,6 @@ public distributed actor ChatServer: Chat {
 
 // MARK: - Server Main
 
-@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 @main
 public struct ChatServerMain: Server {
     public init() {}

@@ -165,34 +165,33 @@ Sources/
 ├── ActorEdge/              # Public API
 │   └── ActorEdge.swift     # @_exported imports
 ├── ActorEdgeCore/          # Core functionality
+│   ├── ActorEdgeID.swift
 │   ├── ActorEdgeSystem.swift
+│   ├── ActorRegistry.swift
 │   ├── GRPCActorTransport.swift
 │   ├── Protocols/
+│   │   ├── ActorTransport.swift
 │   │   ├── Server.swift    # Server protocol with config
-│   │   ├── ServerMiddleware.swift
-│   │   └── ActorTransport.swift
+│   │   └── ServerMiddleware.swift
 │   ├── Configuration/
+│   │   ├── MetricsConfiguration.swift
 │   │   ├── TLSConfiguration.swift
-│   │   ├── TracingConfiguration.swift
-│   │   └── MetricsConfiguration.swift
+│   │   └── TracingConfiguration.swift
+│   ├── Errors/
+│   │   └── ActorEdgeError.swift
 │   ├── Invocation/
-│   │   ├── ActorEdgeInvocationEncoder.swift
 │   │   ├── ActorEdgeInvocationDecoder.swift
+│   │   ├── ActorEdgeInvocationEncoder.swift
 │   │   └── ActorEdgeResultHandler.swift
-│   ├── Serialization/
-│   │   ├── ActorEdgeSerializer.swift
-│   │   └── ActorEdgeDeserializer.swift
-│   ├── Generated/          # Protobuf generated code
-│   │   ├── distributed_actor.pb.swift
-│   │   └── distributed_actor.grpc.swift
-│   └── Tracing/
-│       └── TracingInterceptor.swift
+│   ├── Builders/           # Empty directory for future builder components
+│   ├── Tracing/            # Empty directory for future tracing components
+│   ├── distributed_actor.proto    # Protobuf service definition
+│   └── swift-protobuf-config.json # SwiftProtobufPlugin configuration
 ├── ActorEdgeServer/        # Server-specific
-│   ├── ServerExtension.swift    # main() implementation
 │   ├── DistributedActorService.swift
-│   └── ActorRegistry.swift
+│   └── ServerExtension.swift    # main() implementation
 └── ActorEdgeClient/        # Client-specific
-    └── ConnectionManager.swift
+    └── Connect.swift
 ```
 
 ### gRPC Swift 2.0 Integration

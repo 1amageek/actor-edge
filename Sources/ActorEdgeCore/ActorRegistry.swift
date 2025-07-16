@@ -2,7 +2,6 @@ import Foundation
 import Distributed
 
 /// Registry for managing distributed actors on the server side
-@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 public actor ActorRegistry {
     private var actors: [ActorEdgeID: any DistributedActor] = [:]
     

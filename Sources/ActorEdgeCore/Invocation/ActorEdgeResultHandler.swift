@@ -2,7 +2,6 @@ import Distributed
 import Foundation
 
 /// Handler for distributed actor method results
-@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 public final class ActorEdgeResultHandler: DistributedTargetInvocationResultHandler {
     public typealias SerializationRequirement = Codable & Sendable
     
@@ -61,7 +60,6 @@ public final class ActorEdgeResultHandler: DistributedTargetInvocationResultHand
 }
 
 // Extension to make ActorEdgeResultHandler mutable for data storage
-@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 extension ActorEdgeResultHandler {
     /// Create a result handler that can capture data
     public static func createHandler() -> ActorEdgeResultHandler {

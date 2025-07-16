@@ -3,7 +3,6 @@ import ActorEdgeCore
 import Distributed
 
 /// Convenience methods for connecting to ActorEdge servers
-@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 public extension ActorEdgeSystem {
     /// Create a client system connected to the specified endpoint
     static func client(
@@ -16,7 +15,6 @@ public extension ActorEdgeSystem {
 }
 
 /// Convenience methods for resolving distributed actors
-@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 public extension DistributedActor where ActorSystem == ActorEdgeSystem {
     /// Resolve a distributed actor with a string ID
     static func resolve(

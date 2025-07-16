@@ -12,7 +12,6 @@ import NIOSSL
 
 // MARK: - Server Extension
 
-@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 public extension Server {
     /// Main entry point for ActorEdge servers
     static func main() async throws {
@@ -84,7 +83,6 @@ public extension Server {
 
 // MARK: - ActorEdgeSystem Extensions for Server
 
-@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 extension ActorEdgeSystem {
     /// Register any distributed actor with the system
     func registerActor(_ actor: any DistributedActor, id: ActorEdgeID) async {
@@ -97,7 +95,6 @@ extension ActorEdgeSystem {
 
 // MARK: - ServerMiddleware to gRPC Interceptor Conversion
 
-@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, *)
 extension ServerMiddleware {
     /// Convert ServerMiddleware to gRPC interceptor if possible
     func asGRPCInterceptor() -> (any ServerInterceptor)? {
