@@ -14,7 +14,8 @@ swift test
 swift test --filter TestName
 
 ### Generate Protobuf files
-protoc --swift_out=. distributed_actor.proto
+SwiftProtobufPlugin automatically generates Swift code during build
+Configuration: Sources/ActorEdgeCore/swift-protobuf-config.json
 
 ### Clean build
 swift package clean
@@ -46,61 +47,80 @@ public protocol Chat: DistributedActor where ActorSystem == ActorEdgeSystem {
 
 // Server module
 @main
-struct ChatServer: Server, Chat {
-    init() {}  // Required by Server protocol
+public struct ChatServer: Server {
+    public init() {}
+    
+    @ActorBuilder
+    public func actors(actorSystem: ActorEdgeSystem) -> [any DistributedActor] {
+        ChatServerActor(actorSystem: actorSystem)
+    }
     
     // Use default port 8000 and host 127.0.0.1
     // Override only if needed:
-    // var port: Int { 9000 }
-    // var host: String { "0.0.0.0" }  // For external access
+    // public var port: Int { 9000 }
+    // public var host: String { "0.0.0.0" }  // For external access
+}
+
+// Distributed actor implementation
+public distributed actor ChatServerActor: Chat {
+    public typealias ActorSystem = ActorEdgeSystem
     
-    // Business logic
-    distributed func send(_ text: String) async throws {
+    public init(actorSystem: ActorSystem) {
+        self.actorSystem = actorSystem
+    }
+    
+    public distributed func send(_ text: String) async throws {
         logger.info("Received: \(text)")
     }
     
-    distributed func subscribe() async throws -> AsyncStream<Message> {
+    public distributed func subscribe() async throws -> AsyncStream<Message> {
         // Return message stream
     }
 }
 
 // Client module - uses auto-generated $Chat stub
-let system = try await ActorEdgeSystem.client(
-    endpoint: "api.example.com:443",
-    tls: .makeClientTLS()
-)
-let chat = try $Chat.resolve(id: "chat-server", using: system)
+let transport = try await GRPCActorTransport("127.0.0.1:8000")
+let system = ActorEdgeSystem(transport: transport)
+let chat = try $Chat.resolve(id: ActorEdgeID(), using: system)
 try await chat.send("Hello")
 ```
 
 ### Server Configuration
 
-The `Server` protocol provides declarative configuration through computed properties:
+The `Server` protocol provides declarative configuration through computed properties and the `@ActorBuilder` pattern:
 
 ```swift
 public protocol Server {
-    // Required initialization
     init()
     
-    // Required configuration
-    var port: Int { get }
+    // Actor Configuration
+    @ActorBuilder
+    func actors(actorSystem: ActorEdgeSystem) -> [any DistributedActor]
     
-    // Optional configuration with defaults
+    // Network Configuration
+    var port: Int { get }
     var host: String { get }
     var tls: TLSConfiguration? { get }
     var middleware: [any ServerMiddleware] { get }
     var maxConnections: Int { get }
     var timeout: TimeInterval { get }
+    var metrics: MetricsConfiguration { get }
+    var tracing: TracingConfiguration { get }
 }
 
 // Default implementations provided
 extension Server {
+    @ActorBuilder
+    func actors(actorSystem: ActorEdgeSystem) -> [any DistributedActor] { [] }
+    
     var port: Int { 8000 }              // Default port like Deno
     var host: String { "127.0.0.1" }    // Secure default: localhost only
     var tls: TLSConfiguration? { nil }
     var middleware: [any ServerMiddleware] { [] }
     var maxConnections: Int { 1000 }
     var timeout: TimeInterval { 30 }
+    var metrics: MetricsConfiguration { .default }
+    var tracing: TracingConfiguration { .default }
 }
 ```
 
@@ -250,30 +270,37 @@ message RemoteCallRequest {
 1. **Package.swift**: Added all dependencies including gRPC Swift 2.0
 2. **Core Types**: Implemented `ActorEdgeSystem`, `ActorTransport` protocol
 3. **Serialization**: Created `ActorEdgeInvocationEncoder/Decoder` with JSON format
-4. **Server Protocol**: Implemented `Server` protocol with `main()` extension
+4. **Server Protocol**: Implemented `Server` protocol with `@ActorBuilder` and `main()` extension
 5. **Transport**: `GRPCActorTransport` implementation with async/await
 6. **Service**: `DistributedActorService` as RegistrableRPCService
-7. **Protobuf**: Generated Swift code from distributed_actor.proto
+7. **Protobuf**: SwiftProtobufPlugin for automatic code generation
 8. **Error Handling**: Basic `ErrorEnvelope` implementation
+9. **Actor Registry**: Server-side actor registration and lookup system
+10. **Method Invocation**: Runtime distributed method execution with ResultHandler
+11. **ActorBuilder**: SwiftUI-style declarative actor configuration
+12. **Examples**: Complete Chat example with SharedAPI, Server, and Client
+13. **Testing Strategy**: Comprehensive testing framework and guidelines
 
 ⏳ **Pending**:
-1. **Actor Registry**: Server-side actor registration and lookup
-2. **Method Invocation**: Runtime distributed method execution
-3. **Binary Serialization**: Switch from JSON to binary format
-4. **ServiceLifecycle**: Proper integration with ServiceGroup
-5. **Examples**: Create SharedAPI, Server, and Client example packages
+1. **Binary Serialization**: Switch from JSON to binary format for performance
+2. **ServiceLifecycle**: Enhanced integration with ServiceGroup
+3. **Test Implementation**: Unit, integration, and performance tests
+4. **TLS Support**: Production-ready TLS configuration
+5. **Middleware System**: Request/response middleware pipeline
 
 ### Key Implementation Notes
 
 - **gRPC Swift 2.0**: Uses modern async/await APIs throughout, no EventLoopFutures
 - **Custom Service**: Implements `RegistrableRPCService` without protobuf service generation
 - **Message Format**: ActorEdge invocation format wrapped in protobuf for transport
-- **@Resolvable Usage**: Protocols must inherit from `DistributedActor`, contain only `distributed func` methods, no associated types, and all parameter/return types must be `Codable`
+- **@Resolvable Usage**: Protocols must inherit from `DistributedActor`, contain only `distributed func` methods, no associated types, and all parameter/return types must be `Codable & Sendable`
 - **Single Connection**: Each `GRPCClient` maintains one HTTP/2 connection per endpoint
 - **Error Propagation**: Remote errors are wrapped in `ErrorEnvelope` and re-thrown on client
 - **Context Propagation**: Trace/Baggage context propagated via gRPC metadata
 - **Binary Size**: Keep iOS delta < 1.4MB by careful dependency management
 - **ServiceLifecycle**: Server uses `ServiceGroup` for proper lifecycle management
+- **ActorBuilder**: SwiftUI-style `@ActorBuilder` for declarative actor configuration
+- **SwiftProtobufPlugin**: Automatic protobuf code generation during build
 
 ### Design Constraints
 
