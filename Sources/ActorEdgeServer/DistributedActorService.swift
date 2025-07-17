@@ -92,7 +92,7 @@ public final class DistributedActorService: RegistrableRPCService {
             }
             
             // Create invocation decoder
-            var decoder = ActorEdgeInvocationDecoder(
+            var decoder = try ActorEdgeInvocationDecoder(
                 system: system,
                 payload: message.payload
             )
@@ -104,12 +104,15 @@ public final class DistributedActorService: RegistrableRPCService {
             let target = RemoteCallTarget(message.method)
             
             // Execute the distributed method using the actor system
-            let resultData: Data = try await system.executeDistributedTarget(
+            try await system.executeDistributedTarget(
                 on: actor,
                 target: target,
                 invocationDecoder: &decoder,
                 handler: resultHandler
             )
+            
+            // Get the result data from the result handler
+            let resultData = resultHandler.getResultData()
             
             logger.debug("Remote call completed successfully", metadata: [
                 "actorID": "\(actorID)",

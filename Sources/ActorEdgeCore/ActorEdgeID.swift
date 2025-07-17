@@ -2,25 +2,49 @@ import Foundation
 import Distributed
 
 /// A unique identifier for distributed actors in the ActorEdge system.
-/// Uses a 96-bit UUID encoded as base64url for compact representation.
+/// 
+/// ActorEdgeID supports multiple formats:
+/// - Well-known IDs: Simple string identifiers (e.g., "chat-server", "user-service")
+/// - Generated IDs: Timestamp-based unique identifiers with optional prefix
+/// - Custom IDs: Any string value provided by the user
 public struct ActorEdgeID: Sendable, Hashable, Codable {
     private let value: String
     
-    /// Creates a new unique actor ID
+    /// Creates a new unique actor ID with timestamp and random component
+    /// Format: "timestamp-random" where timestamp is Unix epoch in milliseconds
     public init() {
-        let uuid = UUID()
-        let data = withUnsafeBytes(of: uuid) { Data($0) }
-        self.value = data.base64URLEncodedString()
+        let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+        let randomBytes = UUID().uuidString.prefix(8)
+        self.value = "\(timestamp)-\(randomBytes)"
     }
     
-    /// Creates an actor ID from an existing string value
+    /// Creates a new unique actor ID with a prefix
+    /// Format: "prefix-timestamp-random"
+    public init(prefix: String) {
+        let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+        let randomBytes = UUID().uuidString.prefix(8)
+        self.value = "\(prefix)-\(timestamp)-\(randomBytes)"
+    }
+    
+    /// Creates an actor ID from an existing string value (well-known ID)
     public init(_ value: String) {
         self.value = value
+    }
+    
+    /// Creates a well-known actor ID (alias for init(_:) for clarity)
+    public static func wellKnown(_ id: String) -> ActorEdgeID {
+        ActorEdgeID(id)
     }
     
     /// The string representation of this actor ID
     public var description: String {
         value
+    }
+    
+    /// Returns true if this is a well-known ID (doesn't contain timestamp)
+    public var isWellKnown: Bool {
+        // Simple heuristic: well-known IDs don't contain numbers at the beginning
+        !value.contains(where: { $0.isNumber }) || !value.contains("-")
     }
 }
 

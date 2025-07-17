@@ -69,6 +69,10 @@ public protocol Server {
     @ActorBuilder
     func actors(actorSystem: ActorEdgeSystem) -> [any DistributedActor]
     
+    /// Provides well-known IDs for actors (optional)
+    /// If not implemented, actors will be assigned IDs like "actor-0", "actor-1", etc.
+    var actorIDs: [String] { get }
+    
     // MARK: - Required Configuration
     
     /// The port to listen on
@@ -105,6 +109,7 @@ public extension Server {
         []
     }
     
+    var actorIDs: [String] { [] }
     var port: Int { 8000 }
     var host: String { "127.0.0.1" }
     var tls: TLSConfiguration? { nil }

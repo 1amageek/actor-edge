@@ -31,8 +31,16 @@ public extension Server {
         let actors = server.actors(actorSystem: system)
         
         // Register server's actors with the system
+        let providedIDs = server.actorIDs
         for (index, actor) in actors.enumerated() {
-            let actorID = ActorEdgeID("actor-\(index)")
+            // Use provided actor IDs if available, otherwise use default pattern
+            let actorID: ActorEdgeID
+            if index < providedIDs.count {
+                actorID = ActorEdgeID.wellKnown(providedIDs[index])
+            } else {
+                actorID = ActorEdgeID.wellKnown("actor-\(index)")
+            }
+            
             await system.registerActor(actor, id: actorID)
             logger.info("Registered actor", metadata: ["id": "\(actorID)", "type": "\(type(of: actor))"])
         }

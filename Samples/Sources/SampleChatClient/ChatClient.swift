@@ -11,8 +11,8 @@ struct ChatClient {
         let transport = try await GRPCActorTransport("127.0.0.1:8000")
         let system = ActorEdgeSystem(transport: transport)
         
-        // Get the chat actor
-        let chat = try $Chat.resolve(id: ActorEdgeID(), using: system)
+        // Get the chat actor with the well-known ID
+        let chat = try $Chat.resolve(id: ActorEdgeID.wellKnown("chat-server"), using: system)
         
         // Send a message
         let message = Message(username: "Alice", content: "Hello from ActorEdge!")

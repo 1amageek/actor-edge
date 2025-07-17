@@ -17,6 +17,12 @@ public distributed actor ChatActor: Chat {
     
     public init(actorSystem: ActorSystem) {
         self.actorSystem = actorSystem
+        let actorID = self.id
+        Task {
+            // Print the actor ID for clients to use
+            try await Task.sleep(nanoseconds: 100_000_000) // Small delay to ensure ID is assigned
+            Logger(label: "ChatServer").info("ChatActor initialized with ID: \(actorID)")
+        }
     }
     
     // MARK: - Chat Implementation
@@ -59,6 +65,9 @@ struct ChatServer: Server {
     var port: Int { 8000 }
     
     var host: String { "127.0.0.1" }
+    
+    // Provide well-known IDs for our actors
+    var actorIDs: [String] { ["chat-server"] }
   
     func actors(actorSystem: ActorEdgeSystem) -> [any DistributedActor] {
         ChatActor(actorSystem: actorSystem)

@@ -463,3 +463,268 @@ Tests/
 - Focus on technical implementation details
 - Do not include promotional content or advertising
 - Keep messages professional and informative
+
+## Documentation Research Tools
+
+### Remark Command
+
+For researching Apple's official documentation, use the `remark` command to convert HTML documentation to readable Markdown:
+
+```bash
+# Basic usage - convert Apple documentation to Markdown
+remark https://developer.apple.com/documentation/distributed/distributedtargetinvocationencoder
+
+# Include front matter for better organization
+remark --include-front-matter https://developer.apple.com/documentation/distributed/distributedtargetinvocationdecoder
+
+# Plain text output for analysis
+remark --plain-text https://developer.apple.com/documentation/distributed/distributedactorsystem
+```
+
+### Apple Documentation URLs for ActorEdge Development
+
+Key Apple documentation URLs for distributed actor system implementation:
+
+- **DistributedTargetInvocationEncoder**: `https://developer.apple.com/documentation/distributed/distributedtargetinvocationencoder`
+- **DistributedTargetInvocationDecoder**: `https://developer.apple.com/documentation/distributed/distributedtargetinvocationdecoder`
+- **DistributedActorSystem**: `https://developer.apple.com/documentation/distributed/distributedactorsystem`
+- **executeDistributedTarget**: `https://developer.apple.com/documentation/distributed/distributedactorsystem/executedistributedtarget(on:target:invocationdecoder:handler:)`
+- **DistributedTargetInvocationResultHandler**: `https://developer.apple.com/documentation/distributed/distributedtargetinvocationresulthandler`
+
+### Usage Example
+
+```bash
+# Research the exact protocol requirements
+remark --include-front-matter https://developer.apple.com/documentation/distributed/distributedtargetinvocationencoder > docs/DistributedTargetInvocationEncoder.md
+
+# Compare with current implementation
+remark https://developer.apple.com/documentation/distributed/distributedactorsystem/executedistributedtarget(on:target:invocationdecoder:handler:) > docs/executeDistributedTarget.md
+```
+
+## Apple仕様準拠のための実装要件
+
+### DistributedTargetInvocationEncoder要件
+
+Apple公式仕様に基づく必須実装要件：
+
+1. **メソッド実行順序の厳格な遵守**:
+   ```swift
+   recordGenericSubstitution(_:)  // ジェネリック型の記録
+   recordArgument(_:)             // 引数の記録（宣言順）
+   recordReturnType(_:)           // 戻り値型（Voidの場合は呼ばれない）
+   recordErrorType(_:)            // エラー型（throwしない場合は呼ばれない）
+   doneRecording()                // 記録完了シグナル
+   ```
+
+2. **SerializationRequirement準拠**: すべての型が関連型に準拠している必要がある
+
+3. **遅延シリアライゼーション対応**: record時点またはremoteCall時点での選択可能な実装
+
+### DistributedTargetInvocationDecoder要件
+
+1. **ActorSystem統合の必須要件**:
+   ```swift
+   decoder.userInfo[.actorSystemKey] = self.actorSystem
+   ```
+
+2. **順序保持デコーディング**:
+   - `decodeGenericSubstitutions()`: 記録順序で返す必要がある
+   - `decodeNextArgument<Argument>()`: 宣言順序で引数をデコード
+
+3. **分散アクター引数のサポート**: ActorIDからの分散アクター復元機能
+
+### executeDistributedTarget要件
+
+Apple公式の明確な責任範囲：
+
+1. **分散関数の検索**: "looking up the distributed function based on its name"
+2. **効率的な引数デコード**: "decoding all arguments into a well-typed representation"  
+3. **実際のメソッド呼び出し**: "perform the call on the target method"
+
+**重要**: executeDistributedTargetは実際にメソッド呼び出しを行う責任がある
+
+### DistributedTargetInvocationResultHandler要件
+
+1. **型安全な結果処理**:
+   ```swift
+   func onReturn<Success>(value: Success) async throws    // 成功時
+   func onReturnVoid() async throws                       // Void戻り値時
+   func onThrow<Err>(error: Err) async throws           // エラー時
+   ```
+
+2. **existentialボクシング回避**: 最適なパフォーマンスのため
+
+### 現在のActorEdge実装の重大な不適合
+
+1. **InvocationDecoder**: userInfo設定の完全欠如
+2. **executeDistributedTarget**: Swift runtimeとの統合なし、モック実装のみ
+3. **メソッド実行順序**: 順序保証なし
+4. **型安全性**: ジェネリック置換の手抜き実装（`return nil`）
+5. **分散アクター引数**: サポートなし
+
+## swift-distributed-actors実装パターン分析
+
+### ClusterInvocationEncoder実装パターン
+
+```swift
+// データ構造
+struct ClusterInvocationEncoder {
+    var arguments: [Data] = []
+    var genericSubstitutions: [String] = []
+    var throwing: Bool = false
+    
+    // recordGenericSubstitution: マングル名または型名をString配列に保存
+    // recordArgument: system.serializationでDataに変換してarguments配列に追加
+    // recordErrorType: throwingフラグをtrueに設定
+    // recordReturnType, doneRecording: no-op実装
+}
+```
+
+### ClusterInvocationDecoder実装パターン
+
+```swift
+// 状態管理
+enum _State {
+    case remoteCall(InvocationMessage)      // リモート呼び出し
+    case localProxyCall(InvocationEncoder)  // ローカルプロキシ呼び出し
+}
+
+// 重要な実装パターン:
+// - _typeByName()でString型名から実際の型に変換
+// - system.serialization.deserialize()で型安全デシリアライゼーション
+// - Serialization.ContextがuserInfoに自動設定される
+```
+
+### ClusterInvocationResultHandler実装パターン
+
+```swift
+// 状態による分岐処理
+enum _State {
+    case localDirectReturn(CheckedContinuation<Any, Error>)
+    case remoteCall(system: ClusterSystem, callID: CallID, channel: Channel)
+}
+
+// onReturn: ローカルは継続再開、リモートはRemoteCallReply送信
+// onReturnVoid: 同様の分岐、Voidは_Done型使用
+// onThrow: CodableエラーとGenericRemoteCallErrorの使い分け
+```
+
+### RemoteCallTarget/RemoteCallArgument処理
+
+- **RemoteCallTarget**: targetIdentifier(String)でメソッド識別
+- **RemoteCallArgument**: 単純なvalue wrapper、実際の処理はEncoder/Decoderで実行
+- **InvocationMessage**: callID, targetIdentifier, genericSubstitutions, arguments構造
+
+## ActorEdge新設計提案
+
+### 1. ActorEdgeInvocationEncoder完全再実装
+
+```swift
+public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
+    public typealias SerializationRequirement = Codable & Sendable
+    
+    private var arguments: [Data] = []
+    private var genericSubstitutions: [String] = []
+    private var returnTypeInfo: String?
+    private var errorTypeInfo: String?
+    private var throwing: Bool = false
+    
+    private let system: ActorEdgeSystem
+    private let encoder: JSONEncoder  // 将来: 複数シリアライザサポート
+    
+    // Apple仕様準拠の厳密な実装順序保証
+    public mutating func recordGenericSubstitution<T>(_ type: T.Type) throws
+    public mutating func recordArgument<Argument>(_ argument: RemoteCallArgument<Argument>) throws
+    public mutating func recordReturnType<R>(_ returnType: R.Type) throws
+    public mutating func recordErrorType<E: Error>(_ errorType: E.Type) throws
+    public mutating func doneRecording() throws
+}
+```
+
+### 2. ActorEdgeInvocationDecoder完全再実装
+
+```swift
+public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
+    public typealias SerializationRequirement = Codable & Sendable
+    
+    private enum State {
+        case remoteCall(InvocationMessage)
+        case localCall(ActorEdgeInvocationEncoder)
+    }
+    
+    private let state: State
+    private let system: ActorEdgeSystem
+    private var argumentIndex = 0
+    
+    // Apple仕様準拠: decoder.userInfo[.actorSystemKey]自動設定
+    public mutating func decodeGenericSubstitutions() throws -> [any Any.Type] {
+        // _typeByName()相当の実装で型解決
+    }
+    
+    public mutating func decodeNextArgument<Argument>() throws -> Argument {
+        // JSONDecoder with userInfo[.actorSystemKey] = system
+        // 分散アクター引数の自動解決サポート
+    }
+}
+```
+
+### 3. ActorEdgeResultHandler完全再実装
+
+```swift
+public final class ActorEdgeResultHandler: DistributedTargetInvocationResultHandler {
+    private enum State {
+        case localDirectReturn(CheckedContinuation<Any, Error>)
+        case remoteCall(system: ActorEdgeSystem, callID: String, writer: ResponseWriter)
+    }
+    
+    // ローカル vs リモート の完全分離処理
+    public func onReturn<Success>(value: Success) async throws
+    public func onReturnVoid() async throws  
+    public func onThrow<Err>(error: Err) async throws
+}
+```
+
+### 4. executeDistributedTarget真の実装
+
+```swift
+public func executeDistributedTarget<Act>(
+    on actor: Act,
+    target: RemoteCallTarget, 
+    invocationDecoder: inout InvocationDecoder,
+    handler: ResultHandler
+) async throws where Act: DistributedActor {
+    
+    // 1. 分散関数の検索 (Apple仕様)
+    let methodInfo = try resolveDistributedMethod(target: target, actorType: type(of: actor))
+    
+    // 2. 引数の効率的デコード (Apple仕様)
+    let arguments = try decodeArgumentsForMethod(methodInfo, decoder: &invocationDecoder)
+    
+    // 3. 実際のメソッド呼び出し (Apple仕様)
+    try await invokeMethodUsingSwiftRuntime(
+        on: actor,
+        method: methodInfo,
+        arguments: arguments,
+        handler: handler
+    )
+}
+```
+
+### 5. Swift Runtime統合による真の動的呼び出し
+
+```swift
+// Swift runtime APIまたは高度なリフレクション技術を使用
+// MethodRegistry不要の完全動的システム
+private func invokeMethodUsingSwiftRuntime<Act: DistributedActor>(
+    on actor: Act,
+    method: MethodInfo,
+    arguments: [Any],
+    handler: ResultHandler  
+) async throws {
+    // Swift distributed actor runtimeとの適切な統合
+    // existentialボクシング回避
+    // 型安全な呼び出し保証
+}
+```
+
+この設計により、swift-distributed-actorsと同等の完璧な実装が実現されます。
