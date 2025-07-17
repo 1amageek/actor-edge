@@ -12,7 +12,7 @@ struct ChatClient {
         let system = ActorEdgeSystem(transport: transport)
         
         // Get the chat actor with the well-known ID
-        let chat = try $Chat.resolve(id: ActorEdgeID.wellKnown("chat-server"), using: system)
+        let chat = try $Chat.resolve(id: ActorEdgeID("chat-server"), using: system)
         
         // Send a message
         let message = Message(username: "Alice", content: "Hello from ActorEdge!")

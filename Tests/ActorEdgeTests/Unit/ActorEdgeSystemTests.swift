@@ -68,11 +68,15 @@ struct ActorEdgeSystemTests {
         let system = ActorEdgeSystem()
         let id = system.assignID(TestSystemActor.self)
         
-        // Test base64url format (no padding, URL-safe characters)
-        #expect(!id.description.contains("="))
-        #expect(!id.description.contains("/"))
-        #expect(!id.description.contains("+"))
-        #expect(id.description.count == 22) // 128 bits = 16 bytes = 22 base64 chars (padding removed)
+        // Test shortened UUID format: first 8 characters of UUID, lowercase
+        let shortUUIDPattern = #"^[0-9a-f]{8}$"#
+        let regex = try NSRegularExpression(pattern: shortUUIDPattern, options: [])
+        let range = NSRange(location: 0, length: id.description.utf16.count)
+        let matches = regex.matches(in: id.description, options: [], range: range)
+        
+        #expect(matches.count == 1, "ActorEdgeID should be 8 lowercase hex characters")
+        #expect(id.description.count == 8)
+        #expect(id.description == id.description.lowercased(), "ActorEdgeID should be lowercase")
     }
     
     // MARK: - Actor Lifecycle Tests

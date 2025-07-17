@@ -1,72 +1,40 @@
 import Foundation
 import Distributed
 
-/// A unique identifier for distributed actors in the ActorEdge system.
+/// ActorEdgeシステムにおける分散アクターの識別子
 /// 
-/// ActorEdgeID supports multiple formats:
-/// - Well-known IDs: Simple string identifiers (e.g., "chat-server", "user-service")
-/// - Generated IDs: Timestamp-based unique identifiers with optional prefix
-/// - Custom IDs: Any string value provided by the user
+/// 主に固定文字列ID（例："chat-server"）での使用を想定しています。
+/// DistributedActorSystemの要件に準拠し、Hashable、Sendable、Codableを実装。
 public struct ActorEdgeID: Sendable, Hashable, Codable {
+    /// アクターの識別子
     private let value: String
     
-    /// Creates a new unique actor ID with timestamp and random component
-    /// Format: "timestamp-random" where timestamp is Unix epoch in milliseconds
-    public init() {
-        let timestamp = Int(Date().timeIntervalSince1970 * 1000)
-        let randomBytes = UUID().uuidString.prefix(8)
-        self.value = "\(timestamp)-\(randomBytes)"
-    }
-    
-    /// Creates a new unique actor ID with a prefix
-    /// Format: "prefix-timestamp-random"
-    public init(prefix: String) {
-        let timestamp = Int(Date().timeIntervalSince1970 * 1000)
-        let randomBytes = UUID().uuidString.prefix(8)
-        self.value = "\(prefix)-\(timestamp)-\(randomBytes)"
-    }
-    
-    /// Creates an actor ID from an existing string value (well-known ID)
+    /// 固定IDでアクターIDを作成（推奨）
+    /// - Parameter value: アクターの識別文字列
+    /// - Example: ActorEdgeID("chat-server")
     public init(_ value: String) {
         self.value = value
     }
     
-    /// Creates a well-known actor ID (alias for init(_:) for clarity)
-    public static func wellKnown(_ id: String) -> ActorEdgeID {
-        ActorEdgeID(id)
+    /// ランダムなアクターIDを生成
+    /// - Note: 主にActorSystemのassignID要件やテスト用
+    public init() {
+        // UUIDの短縮版（8文字）で十分な一意性を確保
+        self.value = UUID().uuidString.prefix(8).lowercased()
     }
     
-    /// The string representation of this actor ID
+    /// ID値へのアクセス（デバッグ用）
     public var description: String {
         value
-    }
-    
-    /// Returns true if this is a well-known ID (doesn't contain timestamp)
-    public var isWellKnown: Bool {
-        // Simple heuristic: well-known IDs don't contain numbers at the beginning
-        !value.contains(where: { $0.isNumber }) || !value.contains("-")
     }
 }
 
 // MARK: - CustomStringConvertible
 extension ActorEdgeID: CustomStringConvertible {}
 
-// MARK: - Base64URL Encoding
-extension Data {
-    func base64URLEncodedString() -> String {
-        base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
-    }
-    
-    init?(base64URLEncoded string: String) {
-        let base64 = string
-            .replacingOccurrences(of: "-", with: "+")
-            .replacingOccurrences(of: "_", with: "/")
-        
-        let padding = String(repeating: "=", count: (4 - base64.count % 4) % 4)
-        
-        self.init(base64Encoded: base64 + padding)
+// MARK: - ExpressibleByStringLiteral
+extension ActorEdgeID: ExpressibleByStringLiteral {
+    public init(stringLiteral value: String) {
+        self.init(value)
     }
 }

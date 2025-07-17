@@ -13,27 +13,33 @@ service DistributedActor {
 
 // Request for a remote method call
 message RemoteCallRequest {
+  // Unique identifier for this call
+  string call_id = 1;
+  
   // The target actor's ID (96-bit UUID as base64url)
-  string actor_id = 1;
+  string actor_id = 2;
   
   // The method identifier (mangled function signature)
-  string method = 2;
+  string method = 3;
   
   // Serialized arguments using InvocationEncoder
-  bytes payload = 3;
+  bytes payload = 4;
   
   // Optional metadata for tracing/context
-  map<string, string> metadata = 4;
+  map<string, string> metadata = 5;
 }
 
 // Response from a remote method call
 message RemoteCallResponse {
+  // Corresponding request call_id
+  string call_id = 1;
+  
   oneof result {
     // Successful return value
-    bytes value = 1;
+    bytes value = 2;
     
     // Error occurred during execution
-    ErrorEnvelope error = 2;
+    ErrorEnvelope error = 3;
   }
 }
 

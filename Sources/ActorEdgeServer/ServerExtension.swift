@@ -24,98 +24,28 @@ public extension Server {
         // Create server instance
         let server = Self()
         
-        // Create actor system
-        let system = ActorEdgeSystem()
-        
-        // Get server's actors with the system
-        let actors = server.actors(actorSystem: system)
-        
-        // Register server's actors with the system
-        let providedIDs = server.actorIDs
-        for (index, actor) in actors.enumerated() {
-            // Use provided actor IDs if available, otherwise use default pattern
-            let actorID: ActorEdgeID
-            if index < providedIDs.count {
-                actorID = ActorEdgeID.wellKnown(providedIDs[index])
-            } else {
-                actorID = ActorEdgeID.wellKnown("actor-\(index)")
-            }
-            
-            await system.registerActor(actor, id: actorID)
-            logger.info("Registered actor", metadata: ["id": "\(actorID)", "type": "\(type(of: actor))"])
-        }
-        
-        // Configure transport security
-        let transportSecurity: HTTP2ServerTransport.Posix.TransportSecurity
-        if let tlsConfig = server.tls {
-            // Note: grpc-swift 2.0 has limited TLS configuration API
-            // The full TLS configuration is not exposed in the public API yet
-            // For basic TLS, we can use the available options
-            
-            if tlsConfig.certificateChainSources.isEmpty {
-                logger.warning("TLS configuration provided but no certificates found. Using plaintext.")
-                transportSecurity = .plaintext
-            } else {
-                // Log warning about limited TLS support
-                logger.warning("TLS configuration provided. Note: Full TLS configuration support is limited in grpc-swift 2.0.")
-                
-                // For now, we use plaintext until grpc-swift exposes the full TLS API
-                // In production, you would need to use the available TLS methods when they become public
-                transportSecurity = .plaintext
-                
-                // TODO: When grpc-swift 2.0 exposes the TLS configuration API, use:
-                // transportSecurity = .tls(
-                //     certificateChain: tlsConfig.certificateChain.map { .certificate($0) },
-                //     privateKey: .privateKey(tlsConfig.privateKey)
-                // )
-            }
-        } else {
-            transportSecurity = .plaintext
-        }
-        
-        // Create gRPC server
-        let grpcServer = GRPCServer(
-            transport: HTTP2ServerTransport.Posix(
-                address: .ipv4(host: server.host, port: server.port),
-                transportSecurity: transportSecurity,
-                config: .defaults { config in
-                    // Configure server settings
-                    config.http2.targetWindowSize = 65536
-                    config.http2.maxFrameSize = 16384
-                }
-            ),
-            services: [DistributedActorService(system: system)],
-            interceptors: server.middleware.compactMap { $0.asGRPCInterceptor() }
+        // Create service configuration
+        let configuration = ActorEdgeService.Configuration(
+            server: server,
+            threads: System.coreCount,
+            minGracePeriod: .seconds(5),
+            avgLatencySeconds: 0.1
         )
         
-        logger.info("ActorEdge server configured", metadata: [
-            "host": "\(server.host)",
-            "port": "\(server.port)",
-            "tls": "\(server.tls != nil)",
-            "maxConnections": "\(server.maxConnections)"
-        ])
+        // Create and run the service with ServiceLifecycle
+        let service = ActorEdgeService(configuration: configuration)
+        let serviceGroup = ServiceGroup(
+            services: [service],
+            gracefulShutdownSignals: [.sigterm, .sigint],
+            logger: logger
+        )
         
-        logger.info("Starting gRPC server...")
-        
-        // Run the gRPC server directly
-        // TODO: Integrate with ServiceLifecycle properly
-        try await grpcServer.serve()
+        try await serviceGroup.run()
         
         logger.info("ActorEdge server shut down gracefully")
     }
 }
 
-// MARK: - ActorEdgeSystem Extensions for Server
-
-extension ActorEdgeSystem {
-    /// Register any distributed actor with the system
-    func registerActor(_ actor: any DistributedActor, id: ActorEdgeID) async {
-        guard let registry = registry else {
-            return
-        }
-        await registry.register(actor, id: id)
-    }
-}
 
 // MARK: - ServerMiddleware to gRPC Interceptor Conversion
 

@@ -14,6 +14,7 @@ public enum ActorEdgeError: Error, Codable, Sendable {
     case missingArgument
     case invalidFormat(String)
     case invocationError(String)
+    case remoteCallFailed(RemoteCallError)
     
     private enum CodingKeys: String, CodingKey {
         case type
@@ -21,6 +22,7 @@ public enum ActorEdgeError: Error, Codable, Sendable {
         case method
         case message
         case errorEnvelope
+        case remoteCallError
     }
     
     public init(from decoder: Decoder) throws {
@@ -60,6 +62,9 @@ public enum ActorEdgeError: Error, Codable, Sendable {
         case "invocationError":
             let message = try container.decode(String.self, forKey: .message)
             self = .invocationError(message)
+        case "remoteCallFailed":
+            let remoteCallError = try container.decode(RemoteCallError.self, forKey: .remoteCallError)
+            self = .remoteCallFailed(remoteCallError)
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .type,
@@ -105,6 +110,9 @@ public enum ActorEdgeError: Error, Codable, Sendable {
         case .invocationError(let message):
             try container.encode("invocationError", forKey: .type)
             try container.encode(message, forKey: .message)
+        case .remoteCallFailed(let remoteCallError):
+            try container.encode("remoteCallFailed", forKey: .type)
+            try container.encode(remoteCallError, forKey: .remoteCallError)
         }
     }
 }

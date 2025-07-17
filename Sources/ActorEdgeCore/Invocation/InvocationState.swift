@@ -1,5 +1,6 @@
 import Foundation
 import Distributed
+import SwiftProtobuf
 
 /// State management for invocation encoding
 /// Based on swift-distributed-actors patterns
@@ -33,9 +34,6 @@ public enum ResultHandlerState {
         callID: String,
         responseWriter: any ResponseWriter
     )
-    
-    /// Legacy mode for backward compatibility (stores data internally)
-    case legacyMode
 }
 
 /// Protocol for writing responses back to remote callers
@@ -52,27 +50,80 @@ public protocol ResponseWriter: Sendable {
 
 /// Response writer implementation for gRPC streaming responses
 public struct GRPCResponseWriter: ResponseWriter {
-    private let writeFunction: @Sendable (Data) async throws -> Void
+    private let callID: String
+    private let writeResponse: @Sendable (Actoredge_RemoteCallResponse) async throws -> Void
     
-    public init<W: AsyncWriter>(writer: W) where W.Element == Data {
-        self.writeFunction = { data in
-            try await writer.write(data)
-        }
+    public init(callID: String, writeResponse: @escaping @Sendable (Actoredge_RemoteCallResponse) async throws -> Void) {
+        self.callID = callID
+        self.writeResponse = writeResponse
     }
     
     public func writeSuccess(_ data: Data) async throws {
-        // For now, write the data directly - reply wrapping will be handled later
-        try await writeFunction(data)
+        let response = Actoredge_RemoteCallResponse.with {
+            $0.callID = callID
+            $0.value = data
+        }
+        try await writeResponse(response)
     }
     
     public func writeVoid() async throws {
-        let voidData = try JSONEncoder().encode(VoidReturn())
-        try await writeFunction(voidData)
+        // For void returns, send empty data
+        let response = Actoredge_RemoteCallResponse.with {
+            $0.callID = callID
+            $0.value = Data()
+        }
+        try await writeResponse(response)
     }
     
     public func writeError(_ error: RemoteCallError) async throws {
-        let errorData = try JSONEncoder().encode(error)
-        try await writeFunction(errorData)
+        let errorEnvelope = createErrorEnvelope(from: error)
+        let response = Actoredge_RemoteCallResponse.with {
+            $0.callID = callID
+            $0.error = errorEnvelope
+        }
+        try await writeResponse(response)
+    }
+    
+    private func createErrorEnvelope(from error: RemoteCallError) -> Actoredge_ErrorEnvelope {
+        switch error {
+        case .generic(let message):
+            return Actoredge_ErrorEnvelope.with {
+                $0.typeURL = "RemoteCallError.generic"
+                $0.data = Data(message.utf8)
+                $0.description_p = message
+            }
+        case .codableError(let data, let typeName):
+            return Actoredge_ErrorEnvelope.with {
+                $0.typeURL = typeName
+                $0.data = data
+                $0.description_p = "Codable error of type \(typeName)"
+            }
+        case .timedOut(let callID):
+            return Actoredge_ErrorEnvelope.with {
+                $0.typeURL = "RemoteCallError.timedOut"
+                $0.data = Data(callID.utf8)
+                $0.description_p = "Call timed out: \(callID)"
+            }
+        case .systemShutDown:
+            return Actoredge_ErrorEnvelope.with {
+                $0.typeURL = "RemoteCallError.systemShutDown"
+                $0.data = Data()
+                $0.description_p = "System is shutting down"
+            }
+        case .invalidReply(let callID):
+            return Actoredge_ErrorEnvelope.with {
+                $0.typeURL = "RemoteCallError.invalidReply"
+                $0.data = Data(callID.utf8)
+                $0.description_p = "Invalid reply for call: \(callID)"
+            }
+        case .illegalReplyType(let callID, let expected, let got):
+            let errorData = "\(callID)|\(expected)|\(got)"
+            return Actoredge_ErrorEnvelope.with {
+                $0.typeURL = "RemoteCallError.illegalReplyType"
+                $0.data = Data(errorData.utf8)
+                $0.description_p = "Illegal reply type for call \(callID), expected: \(expected), got: \(got)"
+            }
+        }
     }
 }
 
@@ -95,10 +146,6 @@ public struct CallIDGenerator {
 
 /// Metadata keys for distributed actor context
 public extension CodingUserInfoKey {
-    /// Key for storing the ActorEdgeSystem in decoder userInfo
-    /// Required for distributed actor argument deserialization
-    static let actorSystemKey = CodingUserInfoKey(rawValue: "ActorEdgeSystem")!
-    
     /// Key for storing serialization context
     static let serializationContextKey = CodingUserInfoKey(rawValue: "SerializationContext")!
 }

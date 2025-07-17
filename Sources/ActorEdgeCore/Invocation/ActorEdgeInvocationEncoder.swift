@@ -29,16 +29,15 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
     /// Reference to the actor system for serialization
     private let system: ActorEdgeSystem
     
-    /// JSON encoder for serialization
-    private let encoder: JSONEncoder
+    /// Serialization system for encoding arguments
+    private var serialization: ActorEdgeSerialization {
+        system.serialization
+    }
     
     // MARK: - Initialization
     
     public init(system: ActorEdgeSystem) {
         self.system = system
-        self.encoder = JSONEncoder()
-        self.encoder.dateEncodingStrategy = .iso8601
-        self.encoder.outputFormatting = [.sortedKeys]
     }
     
     // MARK: - DistributedTargetInvocationEncoder Implementation
@@ -61,9 +60,9 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
             throw ActorEdgeError.invocationError("Cannot record after doneRecording()")
         }
         
-        // Serialize argument value to Data (following ClusterInvocationEncoder pattern)
-        let data = try encoder.encode(argument.value)
-        arguments.append(data)
+        // Serialize argument value using ActorEdgeSerialization
+        let buffer = try serialization.serialize(argument.value)
+        arguments.append(buffer.readData())
     }
     
     public mutating func recordReturnType<R>(
@@ -123,7 +122,9 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
             returnType: returnTypeInfo,
             errorType: errorTypeInfo
         )
-        return try encoder.encode(envelope)
+        // Use serialization system for consistency
+        let buffer = try serialization.serialize(envelope)
+        return buffer.readData()
     }
 }
 

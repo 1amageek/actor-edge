@@ -60,7 +60,7 @@ public struct ActorBuilder {
 // MARK: - Server Protocol
 
 /// Protocol for defining ActorEdge servers with declarative configuration
-public protocol Server {
+public protocol Server: Sendable {
     init()
     
     // MARK: - Actor Configuration

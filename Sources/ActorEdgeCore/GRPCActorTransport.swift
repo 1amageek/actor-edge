@@ -5,17 +5,34 @@ import GRPCProtobuf
 import ServiceContextModule
 import Logging
 import SwiftProtobuf
+import NIOCore
+import NIOPosix
 import NIOSSL
+import Metrics
 
 /// gRPC-based transport implementation for ActorEdge
 public final class GRPCActorTransport: ActorTransport, Sendable {
     private let transport: HTTP2ClientTransport.Posix
     private let logger: Logger
     private let endpoint: String
+    private let callLifecycleManager: CallLifecycleManager
+    private let eventLoopGroup: MultiThreadedEventLoopGroup
     
-    public init(_ endpoint: String, tls: ClientTLSConfiguration? = nil) async throws {
+    // Metrics
+    private let requestCounter: Counter
+    private let errorCounter: Counter
+    private let metricNames: MetricNames
+    
+    public init(_ endpoint: String, tls: ClientTLSConfiguration? = nil, metricsNamespace: String = "actor_edge") async throws {
         self.endpoint = endpoint
         self.logger = Logger(label: "ActorEdge.Transport")
+        self.eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: System.coreCount)
+        self.callLifecycleManager = CallLifecycleManager(eventLoopGroup: eventLoopGroup, metricsNamespace: metricsNamespace)
+        
+        // Initialize metrics
+        self.metricNames = MetricNames(namespace: metricsNamespace)
+        self.requestCounter = Counter(label: metricNames.grpcRequestsTotal)
+        self.errorCounter = Counter(label: metricNames.grpcErrorsTotal)
         
         // Parse endpoint to extract host and port
         let components = endpoint.split(separator: ":")
@@ -50,8 +67,12 @@ public final class GRPCActorTransport: ActorTransport, Sendable {
         arguments: Data,
         context: ServiceContext
     ) async throws -> Data {
+        // Generate call ID
+        let callID = CallIDGenerator.generate()
+        
         // Create protobuf request
         let request = Actoredge_RemoteCallRequest.with {
+            $0.callID = callID
             $0.actorID = actorID.description
             $0.method = method
             $0.payload = arguments
@@ -62,42 +83,87 @@ public final class GRPCActorTransport: ActorTransport, Sendable {
             }
         }
         
-        // Use withGRPCClient to make the call
-        let response = try await withGRPCClient(transport: transport) { client in
-            // Create metadata from context
-            var metadata = Metadata()
-            if let traceID = context.traceID {
-                metadata.addString(traceID, forKey: "trace-id")
-            }
-            
-            // Make unary RPC call
-            let descriptor = MethodDescriptor(
-                service: ServiceDescriptor(fullyQualifiedService: "actoredge.DistributedActor"),
-                method: "RemoteCall"
-            )
-            
-            return try await client.unary(
-                request: ClientRequest(message: request, metadata: metadata),
-                descriptor: descriptor,
-                serializer: ProtobufSerializer<Actoredge_RemoteCallRequest>(),
-                deserializer: ProtobufDeserializer<Actoredge_RemoteCallResponse>(),
-                options: .defaults
-            ) { response in
-                // Return the response directly
-                response
+        // Update metrics
+        requestCounter.increment()
+        
+        // Get event loop for this call
+        let eventLoop = self.eventLoop
+        
+        // Register call with lifecycle manager
+        let timeout = TimeAmount.seconds(30) // TODO: Make configurable
+        let future = try callLifecycleManager.register(
+            callID: callID,
+            eventLoop: eventLoop,
+            timeout: timeout
+        )
+        
+        // Make the gRPC call in background
+        Task {
+            do {
+                let response = try await withGRPCClient(transport: transport) { client in
+                    // Create metadata from context
+                    var metadata = Metadata()
+                    if let traceID = context.traceID {
+                        metadata.addString(traceID, forKey: "trace-id")
+                    }
+                    
+                    // Make unary RPC call
+                    let descriptor = MethodDescriptor(
+                        service: ServiceDescriptor(fullyQualifiedService: "actoredge.DistributedActor"),
+                        method: "RemoteCall"
+                    )
+                    
+                    return try await client.unary(
+                        request: ClientRequest(message: request, metadata: metadata),
+                        descriptor: descriptor,
+                        serializer: ProtobufSerializer<Actoredge_RemoteCallRequest>(),
+                        deserializer: ProtobufDeserializer<Actoredge_RemoteCallResponse>(),
+                        options: .defaults
+                    ) { response in
+                        response
+                    }
+                }
+                
+                // Handle response
+                let message = try response.message
+                
+                // Verify call ID matches
+                guard message.callID == callID else {
+                    callLifecycleManager.fail(
+                        callID: callID,
+                        error: ActorEdgeError.invalidResponse
+                    )
+                    return
+                }
+                
+                switch message.result {
+                case .value(let data):
+                    // Convert Data to ByteBuffer
+                    var buffer = ByteBufferAllocator().buffer(capacity: data.count)
+                    buffer.writeBytes(data)
+                    callLifecycleManager.succeed(callID: callID, buffer: buffer)
+                    
+                case .error(let errorEnvelope):
+                    let error = deserializeError(errorEnvelope)
+                    errorCounter.increment()
+                    callLifecycleManager.fail(callID: callID, error: error)
+                    
+                case .none:
+                    errorCounter.increment()
+                    callLifecycleManager.fail(
+                        callID: callID,
+                        error: ActorEdgeError.invalidResponse
+                    )
+                }
+            } catch {
+                errorCounter.increment()
+                callLifecycleManager.fail(callID: callID, error: error)
             }
         }
         
-        // Handle response
-        let message = try response.message
-        switch message.result {
-        case .value(let data):
-            return data
-        case .error(let errorEnvelope):
-            throw deserializeError(errorEnvelope)
-        case .none:
-            throw ActorEdgeError.invalidResponse
-        }
+        // Wait for result using EventLoopFuture bridge
+        let buffer = try await future.get()
+        return Data(buffer.readableBytesView)
     }
     
     public func remoteCallVoid(
@@ -132,6 +198,23 @@ public final class GRPCActorTransport: ActorTransport, Sendable {
             data: envelope.data
         )
         return ActorEdgeError.remoteError(errorEnvelope)
+    }
+    
+    // MARK: - EventLoop Access
+    
+    /// Get the next available EventLoop
+    public var eventLoop: EventLoop {
+        eventLoopGroup.next()
+    }
+    
+    // MARK: - Graceful Shutdown
+    
+    deinit {
+        // Cancel all pending calls
+        callLifecycleManager.cancelAll()
+        
+        // Shutdown event loop group
+        try? eventLoopGroup.syncShutdownGracefully()
     }
 }
 

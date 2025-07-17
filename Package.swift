@@ -43,6 +43,9 @@ let package = Package(
         // Tracing and Context
         .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.1.0"),
         .package(url: "https://github.com/apple/swift-service-context.git", from: "1.1.0"),
+        
+        // Metrics
+        .package(url: "https://github.com/apple/swift-metrics.git", from: "2.4.0"),
     ],
     targets: [
         // Main public API
@@ -64,6 +67,7 @@ let package = Package(
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Tracing", package: "swift-distributed-tracing"),
                 .product(name: "ServiceContextModule", package: "swift-service-context"),
+                .product(name: "Metrics", package: "swift-metrics"),
             ],
             exclude: [],
             plugins: [

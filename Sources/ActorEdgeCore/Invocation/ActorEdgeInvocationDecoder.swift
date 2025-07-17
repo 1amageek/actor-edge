@@ -17,8 +17,10 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
     /// Current argument index for sequential decoding
     private var argumentIndex: Int = 0
     
-    /// JSON decoder with proper configuration
-    private let decoder: JSONDecoder
+    /// Serialization system for decoding arguments
+    private var serialization: ActorEdgeSerialization {
+        system.serialization
+    }
     
     // MARK: - Initialization
     
@@ -26,39 +28,27 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
     public init(system: ActorEdgeSystem, message: InvocationMessage) {
         self.system = system
         self.state = .remoteCall(message)
-        self.decoder = JSONDecoder()
-        self.decoder.dateDecodingStrategy = .iso8601
-        
-        // CRITICAL: Set actor system in userInfo for distributed actor deserialization
-        // This is required by Apple's specification for distributed actor arguments
-        self.decoder.userInfo[.actorSystemKey] = system
     }
     
     /// Initialize from a local call encoder (for proxy optimization)
     public init(system: ActorEdgeSystem, encoder: ActorEdgeInvocationEncoder) {
         self.system = system
         self.state = .localCall(encoder)
-        self.decoder = JSONDecoder()
-        self.decoder.dateDecodingStrategy = .iso8601
-        
-        // CRITICAL: Set actor system in userInfo for distributed actor deserialization
-        self.decoder.userInfo[.actorSystemKey] = system
     }
     
     /// Legacy initialization for backward compatibility
     public init(system: ActorEdgeSystem, payload: Data) throws {
         self.system = system
-        self.decoder = JSONDecoder()
-        self.decoder.dateDecodingStrategy = .iso8601
-        self.decoder.userInfo[.actorSystemKey] = system
         
         // Try to decode as InvocationMessage first
-        if let message = try? decoder.decode(InvocationMessage.self, from: payload) {
+        let buffer = SerializationBuffer.data(payload)
+        if let message = try? system.serialization.deserialize(InvocationMessage.self, from: buffer) {
             self.state = .remoteCall(message)
         } else {
             // Fallback to legacy envelope format
-            let envelope = try decoder.decode(InvocationEnvelope.self, from: payload)
+            let envelope = try system.serialization.deserialize(InvocationEnvelope.self, from: buffer)
             let message = InvocationMessage(
+                callID: CallIDGenerator.generate(),
                 targetIdentifier: "unknown",
                 genericSubstitutions: envelope.genericSubstitutions,
                 arguments: envelope.arguments
@@ -124,9 +114,10 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
         
         argumentIndex += 1
         
-        // Decode the argument with proper actor system context
-        // The decoder.userInfo[.actorSystemKey] is crucial for distributed actor arguments
-        return try decoder.decode(Argument.self, from: argumentData)
+        // Decode the argument using ActorEdgeSerialization
+        // This automatically sets userInfo[.actorSystemKey] for distributed actor arguments
+        let buffer = SerializationBuffer.data(argumentData)
+        return try serialization.deserialize(Argument.self, from: buffer)
     }
     
     public mutating func decodeReturnType() throws -> Any.Type? {

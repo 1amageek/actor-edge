@@ -7,6 +7,13 @@ import Distributed
 @Suite("Serialization Tests")
 struct SerializationTests {
     
+    // MARK: - Test Helpers
+    
+    /// Create a test actor system
+    func createTestSystem() -> ActorEdgeSystem {
+        return ActorEdgeSystem()
+    }
+    
     // MARK: - Test Types
     
     struct SimpleMessage: Codable, Sendable, Equatable {
@@ -30,7 +37,8 @@ struct SerializationTests {
     
     @Test("Encode simple argument")
     func testEncodeSimpleArgument() async throws {
-        var encoder = ActorEdgeInvocationEncoder()
+        let system = createTestSystem()
+        var encoder = ActorEdgeInvocationEncoder(system: system)
         
         let message = SimpleMessage(id: 42, message: "Hello")
         let argument = RemoteCallArgument(label: nil, name: "arg", value: message)
@@ -55,7 +63,8 @@ struct SerializationTests {
     
     @Test("Encode multiple arguments")
     func testEncodeMultipleArguments() async throws {
-        var encoder = ActorEdgeInvocationEncoder()
+        let system = createTestSystem()
+        var encoder = ActorEdgeInvocationEncoder(system: system)
         
         let arg1 = RemoteCallArgument(label: nil, name: "arg1", value: "Hello")
         let arg2 = RemoteCallArgument(label: nil, name: "arg2", value: 42)
@@ -86,7 +95,8 @@ struct SerializationTests {
     
     @Test("Encode complex types")
     func testEncodeComplexTypes() async throws {
-        var encoder = ActorEdgeInvocationEncoder()
+        let system = createTestSystem()
+        var encoder = ActorEdgeInvocationEncoder(system: system)
         
         let date = Date()
         let message = ComplexMessage(
@@ -118,7 +128,8 @@ struct SerializationTests {
     
     @Test("Encode generic substitutions")
     func testEncodeGenericSubstitutions() async throws {
-        var encoder = ActorEdgeInvocationEncoder()
+        let system = createTestSystem()
+        var encoder = ActorEdgeInvocationEncoder(system: system)
         
         try encoder.recordGenericSubstitution(String.self)
         try encoder.recordGenericSubstitution(Int.self)
@@ -138,7 +149,8 @@ struct SerializationTests {
     
     @Test("Encode return and error types")
     func testEncodeReturnAndErrorTypes() async throws {
-        var encoder = ActorEdgeInvocationEncoder()
+        let system = createTestSystem()
+        var encoder = ActorEdgeInvocationEncoder(system: system)
         
         try encoder.recordReturnType(String.self)
         try encoder.recordErrorType(TestError.self)
@@ -158,7 +170,8 @@ struct SerializationTests {
     @Test("Decode simple argument")
     func testDecodeSimpleArgument() async throws {
         // First encode
-        var encoder = ActorEdgeInvocationEncoder()
+        let system = createTestSystem()
+        var encoder = ActorEdgeInvocationEncoder(system: system)
         let message = SimpleMessage(id: 123, message: "Test")
         let argument = RemoteCallArgument(label: nil, name: "arg", value: message)
         
@@ -168,7 +181,7 @@ struct SerializationTests {
         let data = try encoder.getEncodedData()
         
         // Then decode
-        var decoder = try ActorEdgeInvocationDecoder(data: data)
+        var decoder = try ActorEdgeInvocationDecoder(system: system, payload: data)
         let decodedMessage: SimpleMessage = try decoder.decodeNextArgument()
         
         #expect(decodedMessage == message)
@@ -177,7 +190,8 @@ struct SerializationTests {
     @Test("Decode multiple arguments")
     func testDecodeMultipleArguments() async throws {
         // Encode multiple arguments
-        var encoder = ActorEdgeInvocationEncoder()
+        let system = createTestSystem()
+        var encoder = ActorEdgeInvocationEncoder(system: system)
         
         try encoder.recordArgument(RemoteCallArgument(label: nil, name: "arg", value: "First"))
         try encoder.recordArgument(RemoteCallArgument(label: nil, name: "arg", value: 123))
@@ -188,7 +202,7 @@ struct SerializationTests {
         let data = try encoder.getEncodedData()
         
         // Decode them back
-        var decoder = try ActorEdgeInvocationDecoder(data: data)
+        var decoder = try ActorEdgeInvocationDecoder(system: system, payload: data)
         
         let arg1: String = try decoder.decodeNextArgument()
         let arg2: Int = try decoder.decodeNextArgument()
@@ -204,14 +218,15 @@ struct SerializationTests {
     @Test("Decode with missing argument error")
     func testDecodeMissingArgument() async throws {
         // Encode one argument
-        var encoder = ActorEdgeInvocationEncoder()
+        let system = createTestSystem()
+        var encoder = ActorEdgeInvocationEncoder(system: system)
         try encoder.recordArgument(RemoteCallArgument(label: nil, name: "arg", value: "Only one"))
         try encoder.doneRecording()
         
         let data = try encoder.getEncodedData()
         
         // Try to decode two arguments
-        var decoder = try ActorEdgeInvocationDecoder(data: data)
+        var decoder = try ActorEdgeInvocationDecoder(system: system, payload: data)
         
         let _: String = try decoder.decodeNextArgument()
         
@@ -226,17 +241,16 @@ struct SerializationTests {
     
     @Test("Decode with system initializer")
     func testDecodeWithSystemInitializer() async throws {
-        let system = ActorEdgeSystem()
-        
         // Create encoded data
-        var encoder = ActorEdgeInvocationEncoder()
+        let system = createTestSystem()
+        var encoder = ActorEdgeInvocationEncoder(system: system)
         try encoder.recordArgument(RemoteCallArgument(label: nil, name: "arg", value: "Test with system"))
         try encoder.doneRecording()
         
         let data = try encoder.getEncodedData()
         
         // Decode with system
-        var decoder = ActorEdgeInvocationDecoder(system: system, payload: data)
+        var decoder = try ActorEdgeInvocationDecoder(system: system, payload: data)
         let decoded: String = try decoder.decodeNextArgument()
         
         #expect(decoded == "Test with system")
@@ -247,11 +261,9 @@ struct SerializationTests {
         let system = ActorEdgeSystem()
         let invalidData = Data("invalid json".utf8)
         
-        // Should not crash, but initialize with empty values
-        var decoder = ActorEdgeInvocationDecoder(system: system, payload: invalidData)
-        
-        // Trying to decode should throw
+        // Initializing with invalid data should throw
         do {
+            var decoder = try ActorEdgeInvocationDecoder(system: system, payload: invalidData)
             let _: String = try decoder.decodeNextArgument()
             #expect(Bool(false), "Should have thrown an error")
         } catch {
@@ -263,7 +275,8 @@ struct SerializationTests {
     
     @Test("Date encoding and decoding")
     func testDateEncodingDecoding() async throws {
-        var encoder = ActorEdgeInvocationEncoder()
+        let system = createTestSystem()
+        var encoder = ActorEdgeInvocationEncoder(system: system)
         
         let now = Date()
         let argument = RemoteCallArgument(label: nil, name: "arg", value: now)
@@ -273,7 +286,7 @@ struct SerializationTests {
         
         let data = try encoder.getEncodedData()
         
-        var decoder = try ActorEdgeInvocationDecoder(data: data)
+        var decoder = try ActorEdgeInvocationDecoder(system: system, payload: data)
         let decodedDate: Date = try decoder.decodeNextArgument()
         
         // Dates should be equal within second precision (due to ISO8601 encoding)
@@ -285,7 +298,8 @@ struct SerializationTests {
     
     @Test("Array encoding and decoding")
     func testArrayEncodingDecoding() async throws {
-        var encoder = ActorEdgeInvocationEncoder()
+        let system = createTestSystem()
+        var encoder = ActorEdgeInvocationEncoder(system: system)
         
         let array = [1, 2, 3, 4, 5]
         let argument = RemoteCallArgument(label: nil, name: "arg", value: array)
@@ -295,7 +309,7 @@ struct SerializationTests {
         
         let data = try encoder.getEncodedData()
         
-        var decoder = try ActorEdgeInvocationDecoder(data: data)
+        var decoder = try ActorEdgeInvocationDecoder(system: system, payload: data)
         let decodedArray: [Int] = try decoder.decodeNextArgument()
         
         #expect(decodedArray == array)
@@ -303,7 +317,8 @@ struct SerializationTests {
     
     @Test("Dictionary encoding and decoding")
     func testDictionaryEncodingDecoding() async throws {
-        var encoder = ActorEdgeInvocationEncoder()
+        let system = createTestSystem()
+        var encoder = ActorEdgeInvocationEncoder(system: system)
         
         let dict = ["apple": 1, "banana": 2, "cherry": 3]
         let argument = RemoteCallArgument(label: nil, name: "arg", value: dict)
@@ -313,7 +328,7 @@ struct SerializationTests {
         
         let data = try encoder.getEncodedData()
         
-        var decoder = try ActorEdgeInvocationDecoder(data: data)
+        var decoder = try ActorEdgeInvocationDecoder(system: system, payload: data)
         let decodedDict: [String: Int] = try decoder.decodeNextArgument()
         
         #expect(decodedDict == dict)
@@ -323,7 +338,8 @@ struct SerializationTests {
     
     @Test("Performance of large payload encoding")
     func testLargePayloadPerformance() async throws {
-        var encoder = ActorEdgeInvocationEncoder()
+        let system = createTestSystem()
+        var encoder = ActorEdgeInvocationEncoder(system: system)
         
         // Create a large array
         let largeArray = Array(0..<1000).map { SimpleMessage(id: $0, message: "Message \($0)") }
@@ -339,7 +355,7 @@ struct SerializationTests {
         
         // Decoding
         let decodeStartTime = CFAbsoluteTimeGetCurrent()
-        var decoder = try ActorEdgeInvocationDecoder(data: data)
+        var decoder = try ActorEdgeInvocationDecoder(system: system, payload: data)
         let decoded: [SimpleMessage] = try decoder.decodeNextArgument()
         let decodingTime = CFAbsoluteTimeGetCurrent() - decodeStartTime
         

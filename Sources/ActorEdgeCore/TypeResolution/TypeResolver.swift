@@ -28,6 +28,12 @@ public struct TypeResolver {
             return VoidReturn.self
         case let name where name.contains("RemoteCallError"):
             return RemoteCallError.self
+        case let name where name.contains("ActorEdgeID"):
+            return ActorEdgeID.self
+        case let name where name.contains("ActorEdgeError"):
+            return ActorEdgeError.self
+        case let name where name.contains("ErrorEnvelope"):
+            return ErrorEnvelope.self
         
         // Custom type resolution (extensible)
         default:

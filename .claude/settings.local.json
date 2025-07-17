@@ -25,7 +25,9 @@
       "WebFetch(domain:forums.swift.org)",
       "Bash(swift build:*)",
       "Bash(./.build/debug/SampleChatClient:*)",
-      "Bash(remark:*)"
+      "Bash(remark:*)",
+      "WebFetch(domain:zenn.dev)",
+      "Bash(grep:*)"
     ],
     "deny": []
   }

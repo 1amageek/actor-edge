@@ -6,6 +6,15 @@ import GRPCProtobuf
 import SwiftProtobuf
 import Logging
 
+/// Actor to safely hold response data
+private actor ResponseHolder {
+    var response: Actoredge_RemoteCallResponse?
+    
+    func setResponse(_ response: Actoredge_RemoteCallResponse) {
+        self.response = response
+    }
+}
+
 /// gRPC service implementation for distributed actors
 public final class DistributedActorService: RegistrableRPCService {
     private let system: ActorEdgeSystem
@@ -50,23 +59,33 @@ public final class DistributedActorService: RegistrableRPCService {
         let message: Actoredge_RemoteCallRequest
         do {
             guard let firstMessage = try await request.messages.first(where: { _ in true }) else {
+                // Return error response with empty call_id since we don't have a message
                 return StreamingServerResponse(
-                    accepted: .failure(RPCError(
-                        code: .invalidArgument,
-                        message: "No message received",
-                        metadata: [:]
-                    ))
-                )
+                    metadata: request.metadata
+                ) { writer in
+                    try await writer.write(.with {
+                        $0.callID = ""  // No call_id available
+                        $0.error = self.createErrorEnvelope(
+                            from: ActorEdgeError.transportError("No message received")
+                        )
+                    })
+                    return [:]
+                }
             }
             message = firstMessage
         } catch {
+            // Return error response with empty call_id since we couldn't read the message
             return StreamingServerResponse(
-                accepted: .failure(RPCError(
-                    code: .unknown,
-                    message: "Failed to read message: \(error)",
-                    metadata: [:]
-                ))
-            )
+                metadata: request.metadata
+            ) { writer in
+                try await writer.write(.with {
+                    $0.callID = ""  // No call_id available
+                    $0.error = self.createErrorEnvelope(
+                        from: ActorEdgeError.transportError("Failed to read message: \(error)")
+                    )
+                })
+                return [:]
+            }
         }
         
         logger.debug("Handling remote call", metadata: [
@@ -83,12 +102,16 @@ public final class DistributedActorService: RegistrableRPCService {
                 logger.warning("Actor not found", metadata: ["actorID": "\(actorID)"])
                 
                 return StreamingServerResponse(
-                    accepted: .failure(RPCError(
-                        code: .notFound,
-                        message: "Actor not found: \(actorID)",
-                        metadata: [:]
-                    ))
-                )
+                    metadata: request.metadata
+                ) { writer in
+                    try await writer.write(.with {
+                        $0.callID = message.callID
+                        $0.error = self.createErrorEnvelope(
+                            from: ActorEdgeError.actorNotFound(actorID)
+                        )
+                    })
+                    return [:]
+                }
             }
             
             // Create invocation decoder
@@ -97,8 +120,20 @@ public final class DistributedActorService: RegistrableRPCService {
                 payload: message.payload
             )
             
-            // Create result handler
-            let resultHandler = ActorEdgeResultHandler()
+            // Create an actor to hold the response safely
+            let responseHolder = ResponseHolder()
+            
+            // Create response writer
+            let responseWriter = GRPCResponseWriter(callID: message.callID) { response in
+                await responseHolder.setResponse(response)
+            }
+            
+            // Create result handler with response writer
+            let resultHandler = ActorEdgeResultHandler.forRemoteCall(
+                system: system,
+                callID: message.callID,
+                responseWriter: responseWriter
+            )
             
             // Create RemoteCallTarget from method name
             let target = RemoteCallTarget(message.method)
@@ -111,18 +146,30 @@ public final class DistributedActorService: RegistrableRPCService {
                 handler: resultHandler
             )
             
-            // Get the result data from the result handler
-            let resultData = resultHandler.getResultData()
-            
             logger.debug("Remote call completed successfully", metadata: [
                 "actorID": "\(actorID)",
                 "method": "\(message.method)"
             ])
             
+            // Get the response from the holder
+            let capturedResponse = await responseHolder.response
+            
+            // Return the captured response
             return StreamingServerResponse(
                 metadata: request.metadata
-            ) { writer in
-                try await writer.write(.with { $0.value = resultData })
+            ) { [self] writer in
+                if let response = capturedResponse {
+                    try await writer.write(response)
+                } else {
+                    // This should not happen, but handle gracefully
+                    self.logger.error("No response captured for remote call")
+                    try await writer.write(.with {
+                        $0.callID = message.callID
+                        $0.error = self.createErrorEnvelope(
+                            from: ActorEdgeError.transportError("No response captured")
+                        )
+                    })
+                }
                 return [:]
             }
             
@@ -134,12 +181,14 @@ public final class DistributedActorService: RegistrableRPCService {
             ])
             
             return StreamingServerResponse(
-                accepted: .failure(RPCError(
-                    code: .unknown,
-                    message: error.localizedDescription,
-                    metadata: [:]
-                ))
-            )
+                metadata: request.metadata
+            ) { writer in
+                try await writer.write(.with {
+                    $0.callID = message.callID
+                    $0.error = self.createErrorEnvelope(from: error)
+                })
+                return [:]
+            }
         }
     }
     

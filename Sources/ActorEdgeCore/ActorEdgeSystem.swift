@@ -2,6 +2,7 @@ import Distributed
 import Foundation
 import Logging
 import ServiceContextModule
+import Metrics
 
 /// The distributed actor system implementation for ActorEdge
 public final class ActorEdgeSystem: DistributedActorSystem {
@@ -16,20 +17,46 @@ public final class ActorEdgeSystem: DistributedActorSystem {
     public let isServer: Bool
     public let registry: ActorRegistry?
     
+    /// The serialization system for this actor system
+    public let serialization: ActorEdgeSerialization
+    
+    // Metrics
+    private let distributedCallsCounter: Counter
+    private let methodInvocationsCounter: Counter
+    private let metricNames: MetricNames
+    
     /// Create a client-side actor system with a transport
-    public init(transport: any ActorTransport) {
+    public init(transport: any ActorTransport, metricsNamespace: String = "actor_edge") {
         self.transport = transport
         self.logger = Logger(label: "ActorEdge.System")
         self.isServer = false
         self.registry = nil
+        self.serialization = ActorEdgeSerialization()
+        
+        // Initialize metrics
+        self.metricNames = MetricNames(namespace: metricsNamespace)
+        self.distributedCallsCounter = Counter(label: metricNames.distributedCallsTotal)
+        self.methodInvocationsCounter = Counter(label: metricNames.methodInvocationsTotal)
+        
+        // Set system after all properties are initialized
+        self.serialization.setSystem(self)
     }
     
     /// Create a server-side actor system without transport
-    public init() {
+    public init(metricsNamespace: String = "actor_edge") {
         self.transport = nil
         self.logger = Logger(label: "ActorEdge.System")
         self.isServer = true
         self.registry = ActorRegistry()
+        self.serialization = ActorEdgeSerialization()
+        
+        // Initialize metrics
+        self.metricNames = MetricNames(namespace: metricsNamespace)
+        self.distributedCallsCounter = Counter(label: metricNames.distributedCallsTotal)
+        self.methodInvocationsCounter = Counter(label: metricNames.methodInvocationsTotal)
+        
+        // Set system after all properties are initialized
+        self.serialization.setSystem(self)
     }
     
     public func resolve<Act>(id: ActorID, as actorType: Act.Type) throws -> Act? 
@@ -104,7 +131,12 @@ public final class ActorEdgeSystem: DistributedActorSystem {
             throw ActorEdgeError.transportError("No transport configured")
         }
         
+        // Update metrics
+        distributedCallsCounter.increment()
+        
         try invocation.doneRecording()
+        
+        // For now, use legacy approach until we implement new Promise-based pattern
         let arguments = try invocation.getEncodedData()
         let context = ServiceContext.current ?? ServiceContext.topLevel
         
@@ -115,11 +147,8 @@ public final class ActorEdgeSystem: DistributedActorSystem {
             context: context
         )
         
-        // Decode the result
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        
-        return try decoder.decode(Res.self, from: resultData)
+        let buffer = SerializationBuffer.data(resultData)
+        return try serialization.deserialize(Res.self, from: buffer)
     }
     
     public func remoteCallVoid<Act, Err>(
@@ -135,7 +164,12 @@ public final class ActorEdgeSystem: DistributedActorSystem {
             throw ActorEdgeError.transportError("No transport configured")
         }
         
+        // Update metrics
+        distributedCallsCounter.increment()
+        
         try invocation.doneRecording()
+        
+        // For now, use legacy approach until we implement new Promise-based pattern
         let arguments = try invocation.getEncodedData()
         let context = ServiceContext.current ?? ServiceContext.topLevel
         
@@ -172,6 +206,9 @@ public final class ActorEdgeSystem: DistributedActorSystem {
             "actorID": "\(actor.id)",
             "method": "\(target.identifier)"
         ])
+        
+        // Update metrics
+        methodInvocationsCounter.increment()
         
         do {
             // Apple specification step 1: Looking up the distributed function based on its name

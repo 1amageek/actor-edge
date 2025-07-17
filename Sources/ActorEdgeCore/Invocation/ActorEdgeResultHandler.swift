@@ -40,16 +40,6 @@ public final class ActorEdgeResultHandler: DistributedTargetInvocationResultHand
         self.encoder.outputFormatting = [.sortedKeys]
     }
     
-    /// Legacy initialization for backward compatibility
-    /// This will be phased out once all usage is updated
-    public init() {
-        // Use a special legacy state that doesn't depend on CheckedContinuation
-        // This is only for backward compatibility
-        self.state = .legacyMode
-        self.encoder = JSONEncoder()
-        self.encoder.dateEncodingStrategy = .iso8601
-        self.encoder.outputFormatting = [.sortedKeys]
-    }
     
     // MARK: - DistributedTargetInvocationResultHandler Implementation
     // Following swift-distributed-actors state-based pattern
@@ -62,7 +52,7 @@ public final class ActorEdgeResultHandler: DistributedTargetInvocationResultHand
             // For local calls, resume the continuation with the value
             continuation.resume(returning: value)
             
-        case .remoteCall(let system, let callID, let responseWriter):
+        case .remoteCall(_, _, let responseWriter):
             // For remote calls, serialize and send back over network
             do {
                 let valueData = try encoder.encode(value)
@@ -76,10 +66,6 @@ public final class ActorEdgeResultHandler: DistributedTargetInvocationResultHand
                 try await responseWriter.writeError(remoteError)
             }
             
-        case .legacyMode:
-            // For legacy mode, store the data internally
-            let valueData = try encoder.encode(value)
-            storeResultData(valueData)
         }
     }
     
@@ -89,13 +75,9 @@ public final class ActorEdgeResultHandler: DistributedTargetInvocationResultHand
             // For local calls, resume with empty tuple (Swift's representation of void)
             continuation.resume(returning: ())
             
-        case .remoteCall(let system, let callID, let responseWriter):
+        case .remoteCall(_, _, let responseWriter):
             // For remote calls, send void return marker
             try await responseWriter.writeVoid()
-            
-        case .legacyMode:
-            // For legacy mode, store empty data for void return
-            storeResultData(Data())
         }
     }
     
@@ -107,14 +89,10 @@ public final class ActorEdgeResultHandler: DistributedTargetInvocationResultHand
             // For local calls, resume by throwing the error
             continuation.resume(throwing: error)
             
-        case .remoteCall(let system, let callID, let responseWriter):
+        case .remoteCall(_, _, let responseWriter):
             // For remote calls, serialize and send error
             let remoteError = serializeError(error)
             try await responseWriter.writeError(remoteError)
-            
-        case .legacyMode:
-            // For legacy mode, re-throw the error (will be handled by caller)
-            throw error
         }
     }
     
@@ -152,22 +130,6 @@ public final class ActorEdgeResultHandler: DistributedTargetInvocationResultHand
         // For non-codable errors, create generic error
         return .generic(String(describing: error))
     }
-    
-    // MARK: - Legacy Support
-    
-    /// Captured result data for legacy compatibility
-    private var capturedData: Data?
-    
-    /// Get the result data (legacy method for backward compatibility)
-    /// This will be removed once all usage is updated to proper state-based handling
-    public func getResultData() -> Data {
-        return capturedData ?? Data()
-    }
-    
-    /// Store result data for legacy compatibility
-    internal func storeResultData(_ data: Data) {
-        self.capturedData = data
-    }
 }
 
 /// Helper for encoding arbitrary Codable errors
@@ -203,10 +165,5 @@ extension ActorEdgeResultHandler {
             callID: callID,
             responseWriter: responseWriter
         )
-    }
-    
-    /// Legacy factory method for backward compatibility
-    public static func createHandler() -> ActorEdgeResultHandler {
-        return ActorEdgeResultHandler()
     }
 }
