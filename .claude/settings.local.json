@@ -28,7 +28,8 @@
       "Bash(remark:*)",
       "WebFetch(domain:zenn.dev)",
       "Bash(grep:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(swift run:*)"
     ],
     "deny": []
   }

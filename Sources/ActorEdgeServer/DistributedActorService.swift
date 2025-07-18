@@ -60,7 +60,7 @@ public final class DistributedActorService: RegistrableRPCService {
                             from: ActorEdgeError.transportError("No message received")
                         )
                     })
-                    return [:]
+                    return request.metadata
                 }
             }
             message = firstMessage
@@ -75,7 +75,7 @@ public final class DistributedActorService: RegistrableRPCService {
                         from: ActorEdgeError.transportError("Failed to read message: \(error)")
                     )
                 })
-                return [:]
+                return request.metadata
             }
         }
         
@@ -102,7 +102,7 @@ public final class DistributedActorService: RegistrableRPCService {
                             from: ActorEdgeError.actorNotFound(actorID)
                         )
                     })
-                    return [:]
+                    return request.metadata
                 }
                 
                 // Create invocation decoder
@@ -128,6 +128,7 @@ public final class DistributedActorService: RegistrableRPCService {
                 let target = RemoteCallTarget(message.method)
                 
                 // Execute the distributed method using the actor system
+                // This should complete synchronously after calling the result handler
                 try await system.executeDistributedTarget(
                     on: actor,
                     target: target,
@@ -153,7 +154,7 @@ public final class DistributedActorService: RegistrableRPCService {
                 })
             }
             
-            return [:]
+            return request.metadata
         }
     }
     
@@ -169,7 +170,7 @@ public final class DistributedActorService: RegistrableRPCService {
                     from: ActorEdgeError.transportError("Streaming not yet implemented")
                 )
             })
-            return [:]
+            return request.metadata
         }
     }
     

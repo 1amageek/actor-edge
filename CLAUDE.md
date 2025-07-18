@@ -24,6 +24,26 @@ swift package clean
 
 ActorEdge is a lightweight gRPC-based distributed actor RPC framework that enables declarative server definitions using Swift's distributed actors. It leverages SE-0428's `@Resolvable` macro to provide type-safe client stubs without requiring clients to know server implementations.
 
+### @Resolvable Macro (SE-0428)
+
+The `@Resolvable` macro revolutionizes distributed actor usage by enabling protocol-based resolution:
+
+```swift
+// Before SE-0428: Clients needed concrete implementation types
+let actor = try ConcreteActor.resolve(id: id, using: system)
+
+// After SE-0428: Clients only need protocol types
+let actor = try $Protocol.resolve(id: id, using: system)
+```
+
+**Key Benefits**:
+- **Decoupling**: Clients don't need to know server implementation types
+- **Module Separation**: SharedAPI, Server, and Client modules are completely independent
+- **Type Safety**: Only protocol-defined methods are accessible
+- **Transparency**: Local and remote actors are used identically
+
+The `@Resolvable` macro generates a stub actor (`$ProtocolName`) that implements the protocol and forwards all calls through the actor system's `remoteCall` methods.
+
 Built on gRPC Swift 2.0, ActorEdge fully embraces Swift's modern async/await concurrency model, providing a natural and idiomatic API for distributed actor communication. The framework integrates seamlessly with Swift's structured concurrency while maintaining the distributed actor programming model.
 
 **Important**: This implementation requires macOS 15.0+ due to gRPC Swift 2.0 and Distributed Actor dependencies.
@@ -554,13 +574,23 @@ Apple公式の明確な責任範囲：
 
 2. **existentialボクシング回避**: 最適なパフォーマンスのため
 
-### 現在のActorEdge実装の重大な不適合
+### Distributed Framework理解の重要な更新
 
-1. **InvocationDecoder**: userInfo設定の完全欠如
-2. **executeDistributedTarget**: Swift runtimeとの統合なし、モック実装のみ
-3. **メソッド実行順序**: 順序保証なし
-4. **型安全性**: ジェネリック置換の手抜き実装（`return nil`）
-5. **分散アクター引数**: サポートなし
+1. **executeDistributedTarget**: これはSwiftランタイムがextensionで提供する。ActorSystemは実装不要。
+2. **invokeHandlerOnReturn**: コンパイラが合成する実装。手動実装は不要。
+3. **@Resolvable**: プロトコル型でのresolveを可能にする重要な機能。
+
+### 現在のActorEdge実装の評価
+
+✅ **正しく実装されている部分**:
+1. **executeDistributedTargetの削除**: Swiftランタイムが提供するため正しい判断
+2. **DistributedActorSystemプロトコル準拠**: 必須メソッドは適切に実装
+3. **@Resolvableの活用**: プロトコルベースの分散アクター解決
+
+⚠️ **改善が必要な部分**:
+1. **invokeHandlerOnReturn**: 削除すべき（コンパイラが合成）
+2. **ジェネリック型解決**: より堅牢な実装が必要
+3. **ストリーム処理**: "Stream unexpectedly closed"エラーの解決
 
 ## swift-distributed-actors実装パターン分析
 
@@ -728,3 +758,306 @@ private func invokeMethodUsingSwiftRuntime<Act: DistributedActor>(
 ```
 
 この設計により、swift-distributed-actorsと同等の完璧な実装が実現されます。
+
+## Distributed Framework動作フロー
+
+### 分散アクターのライフサイクル
+
+```mermaid
+sequenceDiagram
+    participant User as ユーザーコード
+    participant Actor as 分散アクター
+    participant System as ActorSystem
+    participant Runtime as Swiftランタイム
+
+    Note over User,Runtime: 初期化フェーズ
+    User->>Actor: new ChatServer(actorSystem)
+    Actor->>Actor: self.actorSystem = actorSystem
+    Runtime->>System: assignID(ChatServer.self)
+    System-->>Runtime: ActorID
+    Runtime->>Actor: self.id = ActorID
+    Runtime->>System: actorReady(actor)
+    System->>System: アクターを登録
+    Actor-->>User: 初期化完了
+
+    Note over User,Runtime: 使用フェーズ
+    User->>Actor: distributed func呼び出し
+    Actor-->>User: 結果を返す
+
+    Note over User,Runtime: 解放フェーズ
+    Actor->>Runtime: deinit開始
+    Runtime->>System: resignID(actor.id)
+    System->>System: アクターを登録解除
+    Actor->>Actor: deinit完了
+```
+
+### リモートメソッド呼び出しフロー（クライアント側）
+
+```mermaid
+sequenceDiagram
+    participant Client as クライアント
+    participant Stub as $Protocol（スタブ）
+    participant System as ActorSystem
+    participant Encoder as InvocationEncoder
+    participant Transport as Transport
+
+    Client->>Stub: $Protocol.resolve(id, using: system)
+    Stub->>System: system.resolve(id, as: $Protocol.self)
+    System-->>Stub: nil（リモートアクター）
+    Note over Stub: Swiftランタイムが<br/>スタブインスタンス作成
+    Stub-->>Client: protocol instance
+
+    Client->>Stub: protocol.method(args)
+    Stub->>System: makeInvocationEncoder()
+    System-->>Stub: InvocationEncoder
+    
+    Note over Stub,Encoder: エンコーディング
+    Stub->>Encoder: recordGenericSubstitution()
+    Stub->>Encoder: recordArgument()
+    Stub->>Encoder: recordReturnType()
+    Stub->>Encoder: recordErrorType()
+    Stub->>Encoder: doneRecording()
+    
+    Stub->>System: remoteCall/remoteCallVoid
+    System->>Transport: 送信
+    Transport-->>System: レスポンス
+    System-->>Stub: 結果
+    Stub-->>Client: 結果
+```
+
+### サーバー側の処理フロー
+
+```mermaid
+sequenceDiagram
+    participant Transport as Transport
+    participant Service as DistributedActorService
+    participant System as ActorSystem
+    participant Decoder as InvocationDecoder
+    participant Runtime as Swiftランタイム
+    participant Actor as 実アクター
+    participant Handler as ResultHandler
+
+    Transport->>Service: RemoteCallRequest受信
+    Service->>System: findActor(id)
+    System-->>Service: 実アクター
+    
+    Service->>Decoder: new InvocationDecoder(payload)
+    Service->>Handler: new ResultHandler(writer)
+    
+    Note over Service,Runtime: executeDistributedTarget<br/>（ランタイム提供）
+    Service->>Runtime: executeDistributedTarget
+    Runtime->>Decoder: decodeGenericSubstitutions()
+    Runtime->>Decoder: decodeNextArgument() × N
+    Runtime->>Actor: 実際のメソッド呼び出し
+    Actor-->>Runtime: 結果
+    
+    alt 成功
+        Runtime->>Handler: onReturn/onReturnVoid
+    else エラー
+        Runtime->>Handler: onThrow
+    end
+    
+    Handler->>Transport: レスポンス送信
+```
+
+### アクター解決フロー
+
+```mermaid
+flowchart TD
+    A["$Protocol.resolve<br/>id: ActorID, using: System"] --> B{System.resolve<br/>id, as: $Protocol.Type}
+    
+    B -->|ローカルアクター| C[実アクターを返す]
+    B -->|リモートアクター| D[nil を返す]
+    B -->|エラー| E[例外をスロー]
+    
+    D --> F[Swiftランタイムが<br/>$Protocolスタブ作成]
+    
+    C --> G[ローカルアクター<br/>への直接参照]
+    F --> H[リモートアクター<br/>へのプロキシ]
+    
+    G --> I[直接メソッド呼び出し]
+    H --> J[remoteCall経由の<br/>メソッド呼び出し]
+```
+
+## Swift Distributed Actors 使い方ガイド
+
+### 基本的な使い方
+
+#### 1. 分散アクターの定義
+
+```swift
+// SharedAPIモジュール
+@Resolvable
+public protocol UserService: DistributedActor where ActorSystem == ActorEdgeSystem {
+    distributed func getUser(id: String) async throws -> User
+    distributed func updateUser(_ user: User) async throws
+    distributed func subscribe() async throws -> AsyncStream<UserEvent>
+}
+
+// Serverモジュール
+distributed actor UserServiceImpl: UserService {
+    typealias ActorSystem = ActorEdgeSystem
+    
+    private var users: [String: User] = [:]
+    
+    init(actorSystem: ActorSystem) {
+        self.actorSystem = actorSystem
+    }
+    
+    distributed func getUser(id: String) async throws -> User {
+        guard let user = users[id] else {
+            throw UserError.notFound
+        }
+        return user
+    }
+    
+    distributed func updateUser(_ user: User) async throws {
+        users[user.id] = user
+    }
+}
+```
+
+#### 2. サーバーの作成
+
+```swift
+@main
+struct MyServer: Server {
+    @ActorBuilder
+    func actors(actorSystem: ActorEdgeSystem) -> [any DistributedActor] {
+        UserServiceImpl(actorSystem: actorSystem)
+        AuthServiceImpl(actorSystem: actorSystem)
+        NotificationServiceImpl(actorSystem: actorSystem)
+    }
+    
+    var port: Int { 9000 }
+    var host: String { "0.0.0.0" }
+    
+    var tls: TLSConfiguration? {
+        try? TLSConfiguration.server(
+            certificateChain: [.file("/certs/server.pem", format: .pem)],
+            privateKey: .file("/certs/server-key.pem", format: .pem)
+        )
+    }
+}
+```
+
+#### 3. クライアントからの接続
+
+```swift
+// クライアントは実装型を知らない
+let transport = try await GRPCActorTransport(
+    "server.example.com:9000",
+    tls: .systemDefault()
+)
+let system = ActorEdgeSystem(transport: transport)
+
+// プロトコル型で解決（@Resolvableの恩恵）
+let userService = try $UserService.resolve(
+    id: ActorEdgeID("user-service"),
+    using: system
+)
+
+// 透過的に使用
+let user = try await userService.getUser(id: "123")
+try await userService.updateUser(updatedUser)
+
+// ストリーミング
+for await event in try await userService.subscribe() {
+    print("Event: \(event)")
+}
+```
+
+### 重要な概念
+
+#### ActorSystemの役割
+
+1. **ID管理**
+   - `assignID()`: 初期化時にユニークIDを割り当て
+   - `actorReady()`: アクターの準備完了を記録
+   - `resignID()`: 解放時にIDを解放
+
+2. **アクター解決**
+   - サーバー側: ローカルアクターインスタンスを返す
+   - クライアント側: `nil`を返してプロキシ作成を促す
+
+3. **リモート呼び出し**
+   - `remoteCall()`: 戻り値ありのメソッド
+   - `remoteCallVoid()`: 戻り値なしのメソッド
+
+#### InvocationEncoder/Decoderの動作
+
+**エンコード順序（厳密に守る）**:
+1. `recordGenericSubstitution()` - ジェネリック型
+2. `recordArgument()` - 各引数（宣言順）
+3. `recordReturnType()` - 戻り値型（Voidは呼ばれない）
+4. `recordErrorType()` - エラー型（throwsでない場合は呼ばれない）
+5. `doneRecording()` - 完了
+
+**デコード順序**:
+1. `decodeGenericSubstitutions()` - ジェネリック型の復元
+2. `decodeNextArgument()` - 引数の順次デコード
+3. `decodeReturnType()` - 戻り値型（オプション）
+4. `decodeErrorType()` - エラー型（オプション）
+
+### 高度な使い方
+
+#### ミドルウェアの実装
+
+```swift
+struct AuthenticationMiddleware: ServerMiddleware {
+    func intercept(
+        request: ServerRequest,
+        next: (ServerRequest) async throws -> ServerResponse
+    ) async throws -> ServerResponse {
+        guard let token = request.headers["Authorization"] else {
+            throw AuthError.unauthorized
+        }
+        
+        let user = try await validateToken(token)
+        var contextualRequest = request
+        contextualRequest.userInfo["user"] = user
+        
+        return try await next(contextualRequest)
+    }
+}
+```
+
+#### メトリクスとトレーシング
+
+```swift
+@main
+struct ObservableServer: Server {
+    var metrics: MetricsConfiguration {
+        .enabled(
+            namespace: "my_app",
+            labels: ["service": "user-service", "env": "prod"]
+        )
+    }
+    
+    var tracing: TracingConfiguration {
+        .enabled(
+            serviceName: "user-service",
+            sampler: .probabilistic(0.1)
+        )
+    }
+}
+```
+
+### 注意事項とベストプラクティス
+
+1. **SerializationRequirement**
+   - すべての引数・戻り値は`Codable & Sendable`準拠必須
+   - カスタム型も同様の準拠が必要
+
+2. **エラーハンドリング**
+   - ビジネスロジックエラーは`Codable`に準拠
+   - システムエラーは`DistributedActorSystemError`準拠
+
+3. **パフォーマンス**
+   - 単一のHTTP/2接続を再利用
+   - バイナリシリアライゼーション（将来実装）
+
+4. **セキュリティ**
+   - 本番環境ではTLS必須
+   - mTLSでクライアント認証
+   - ミドルウェアで認可実装
