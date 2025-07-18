@@ -12,11 +12,12 @@ import Metrics
 
 /// gRPC-based transport implementation for ActorEdge
 public final class GRPCActorTransport: ActorTransport, Sendable {
-    private let transport: HTTP2ClientTransport.Posix
+    private let client: GRPCClient<HTTP2ClientTransport.Posix>
     private let logger: Logger
     private let endpoint: String
     private let callLifecycleManager: CallLifecycleManager
     private let eventLoopGroup: MultiThreadedEventLoopGroup
+    private let clientTask: Task<Void, Error>
     
     // Metrics
     private let requestCounter: Counter
@@ -40,19 +41,31 @@ public final class GRPCActorTransport: ActorTransport, Sendable {
         let port = components.count > 1 ? Int(components[1]) ?? 443 : 443
         
         // Create HTTP2 transport with appropriate security
+        let transport: HTTP2ClientTransport.Posix
         if tls != nil {
             // For now, we use plaintext and log a warning
             // TODO: Implement proper TLS when grpc-swift 2.0 exposes the configuration API
             logger.warning("TLS configuration provided but not fully implemented. Using plaintext for now.")
-            self.transport = try HTTP2ClientTransport.Posix(
+            transport = try HTTP2ClientTransport.Posix(
                 target: .dns(host: host, port: port),
                 transportSecurity: .plaintext
             )
         } else {
-            self.transport = try HTTP2ClientTransport.Posix(
+            transport = try HTTP2ClientTransport.Posix(
                 target: .dns(host: host, port: port),
                 transportSecurity: .plaintext
             )
+        }
+        
+        // Create GRPCClient with the transport
+        self.client = GRPCClient(transport: transport)
+        
+        // Capture client reference before initializing task
+        let clientRef = self.client
+        
+        // Run the client connections in a background task
+        self.clientTask = Task {
+            try await clientRef.runConnections()
         }
         
         logger.info("GRPCActorTransport initialized", metadata: [
@@ -121,28 +134,26 @@ public final class GRPCActorTransport: ActorTransport, Sendable {
         // Make the gRPC call in background
         Task {
             do {
-                let response = try await withGRPCClient(transport: transport) { client in
-                    // Create metadata from context
-                    var metadata = Metadata()
-                    if let traceID = context.traceID {
-                        metadata.addString(traceID, forKey: "trace-id")
-                    }
-                    
-                    // Make unary RPC call
-                    let descriptor = MethodDescriptor(
-                        service: ServiceDescriptor(fullyQualifiedService: "actoredge.DistributedActor"),
-                        method: "RemoteCall"
-                    )
-                    
-                    return try await client.unary(
-                        request: ClientRequest(message: request, metadata: metadata),
-                        descriptor: descriptor,
-                        serializer: ProtobufSerializer<Actoredge_RemoteCallRequest>(),
-                        deserializer: ProtobufDeserializer<Actoredge_RemoteCallResponse>(),
-                        options: .defaults
-                    ) { response in
-                        response
-                    }
+                // Create metadata from context
+                var metadata = Metadata()
+                if let traceID = context.traceID {
+                    metadata.addString(traceID, forKey: "trace-id")
+                }
+                
+                // Make unary RPC call
+                let descriptor = MethodDescriptor(
+                    service: ServiceDescriptor(fullyQualifiedService: "actoredge.DistributedActor"),
+                    method: "RemoteCall"
+                )
+                
+                let response = try await client.unary(
+                    request: ClientRequest(message: request, metadata: metadata),
+                    descriptor: descriptor,
+                    serializer: ProtobufSerializer<Actoredge_RemoteCallRequest>(),
+                    deserializer: ProtobufDeserializer<Actoredge_RemoteCallResponse>(),
+                    options: .defaults
+                ) { response in
+                    response
                 }
                 
                 // Handle response
@@ -230,9 +241,27 @@ public final class GRPCActorTransport: ActorTransport, Sendable {
     
     // MARK: - Graceful Shutdown
     
+    /// Graceful shutdown
+    public func shutdownGracefully() async throws {
+        // Cancel all pending calls
+        callLifecycleManager.cancelAll()
+        
+        // Begin graceful shutdown of client
+        client.beginGracefulShutdown()
+        
+        // Wait for client task to complete
+        _ = try? await clientTask.value
+        
+        // Shutdown event loop group
+        try await eventLoopGroup.shutdownGracefully()
+    }
+    
     deinit {
         // Cancel all pending calls
         callLifecycleManager.cancelAll()
+        
+        // Cancel client task
+        clientTask.cancel()
         
         // Shutdown event loop group
         try? eventLoopGroup.syncShutdownGracefully()

@@ -17,12 +17,6 @@ struct SampleChat {
         // Start server in background
         logger.info("Starting chat server...")
         let serverTask = Task {
-            // Create actor system
-            let system = ActorEdgeSystem()
-            
-            // Create the chat actor
-            let chatActor = ChatServer(actorSystem: system)
-            
             // Start a simple server
             struct SimpleServer: Server {
                 var port: Int { 8000 }
@@ -77,8 +71,17 @@ struct SampleChat {
         
         logger.info("Sample completed successfully!")
         
-        // Cancel server task
+        // Graceful shutdown
+        logger.info("Shutting down...")
+        
+        // Wait a bit to ensure all operations complete
+        try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+        
+        // The server will shutdown gracefully when the task completes
         serverTask.cancel()
+        
+        // Wait for the server task to finish
+        _ = await serverTask.result
     }
     
     private static func formatDate(_ date: Date) -> String {
