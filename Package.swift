@@ -28,24 +28,24 @@ let package = Package(
     ],
     dependencies: [
         // Networking
-        .package(url: "https://github.com/apple/swift-nio.git", from: "2.70.0"),
-        .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.28.0"),
-        .package(url: "https://github.com/grpc/grpc-swift-2.git", exact: "2.0.0"),
-        .package(url: "https://github.com/grpc/grpc-swift-nio-transport.git", exact: "2.0.0"),
-        .package(url: "https://github.com/grpc/grpc-swift-protobuf.git", exact: "2.0.0"),
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.84.0"),
+        .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.32.0"),
+        .package(url: "https://github.com/grpc/grpc-swift-2.git", exact: "2.2.3"),
+        .package(url: "https://github.com/grpc/grpc-swift-nio-transport.git", exact: "2.2.3"),
+        .package(url: "https://github.com/grpc/grpc-swift-protobuf.git", exact: "2.2.3"),
         // .package(url: "https://github.com/grpc/grpc-swift-extras.git", branch: "main"),
-        .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.28.0"),
+        .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.30.0"),
         
         // Logging and Lifecycle
-        .package(url: "https://github.com/apple/swift-log.git", from: "1.6.0"),
-        .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.6.0"),
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.6.3"),
+        .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.8.0"),
         
         // Tracing and Context
-        .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.1.0"),
-        .package(url: "https://github.com/apple/swift-service-context.git", from: "1.1.0"),
+        .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.2.1"),
+        .package(url: "https://github.com/apple/swift-service-context.git", from: "1.2.1"),
         
         // Metrics
-        .package(url: "https://github.com/apple/swift-metrics.git", from: "2.4.0"),
+        .package(url: "https://github.com/apple/swift-metrics.git", from: "2.7.0"),
     ],
     targets: [
         // Main public API
