@@ -131,8 +131,8 @@ public struct Serialization: Sendable {
         public let manifest: Manifest
         
         /// Additional user info for serialization
-        public var userInfo: [CodingUserInfoKey: Any] {
-            var info: [CodingUserInfoKey: Any] = [:]
+        public var userInfo: [CodingUserInfoKey: any Sendable] {
+            var info: [CodingUserInfoKey: any Sendable] = [:]
             if let system = system {
                 info[.actorSystemKey] = system
             }
@@ -145,53 +145,39 @@ public struct Serialization: Sendable {
 
 /// ActorEdge namespace for shared utilities
 public enum ActorEdge {
-    /// Resolve a type from its name (can be mangled or demangled)
+    /// Resolve a type from its name (mangled or demangled) **without** touching private runtime
+    /// symbols. We rely on the public (but SPI‑gated) `Swift._typeByName` helper and fall back to
+    /// a small table of common primitives so that reflection remains deterministic even when the
+    /// runtime cannot find a match.
+    @_spi(Reflection)
     public static func _typeByName(_ name: String) -> Any.Type? {
-        // First, try to resolve as a mangled name
-        let nameUTF8 = Array(name.utf8)
-        if let type = nameUTF8.withUnsafeBufferPointer({ buffer -> Any.Type? in
-            // Cast to UnsafePointer<UInt8> which is what the function expects
-            guard let baseAddress = buffer.baseAddress else { return nil }
-            return _swift_getTypeByMangledNameInContext(
-                baseAddress,
-                buffer.count,
-                nil,
-                nil
-            )
-        }) {
+        // 1. Primary path – standard runtime resolver (handles generics & mangled names).
+        if let type = Swift._typeByName(name) {
             return type
         }
         
-        // If not a mangled name, try standard library types
+        // 2. Fallback path – well‑known primitives & Foundation types that appear frequently in
+        //    wire manifests. Extend this as needed for domain‑specific models.
         switch name {
-        case "Swift.String": return String.self
-        case "Swift.Int": return Int.self
-        case "Swift.Int32": return Int32.self
-        case "Swift.Int64": return Int64.self
-        case "Swift.UInt": return UInt.self
-        case "Swift.UInt32": return UInt32.self
-        case "Swift.UInt64": return UInt64.self
-        case "Swift.Bool": return Bool.self
-        case "Swift.Double": return Double.self
-        case "Swift.Float": return Float.self
-        case "Foundation.Date": return Date.self
-        case "Foundation.Data": return Data.self
-        case "Foundation.URL": return URL.self
-        case "Foundation.UUID": return UUID.self
+        case "Swift.String":                return String.self
+        case "Swift.Int":                   return Int.self
+        case "Swift.Int32":                 return Int32.self
+        case "Swift.Int64":                 return Int64.self
+        case "Swift.UInt":                  return UInt.self
+        case "Swift.UInt32":                return UInt32.self
+        case "Swift.UInt64":                return UInt64.self
+        case "Swift.Bool":                  return Bool.self
+        case "Swift.Double":                return Double.self
+        case "Swift.Float":                 return Float.self
+        case "Foundation.Date":             return Date.self
+        case "Foundation.Data":             return Data.self
+        case "Foundation.URL":              return URL.self
+        case "Foundation.UUID":             return UUID.self
         case "ActorEdgeCore.InvocationMessage": return InvocationMessage.self
-        case "Swift.Array<Swift.Int>": return [Int].self
-        case "Swift.Dictionary<Swift.String, Swift.Int>": return [String: Int].self
         default:
-            // Handle generic types like Array and Dictionary
-            if name.hasPrefix("Swift.Array<") {
-                // For now, return generic array type
-                return [Any].self
-            } else if name.hasPrefix("Swift.Dictionary<") {
-                // For now, return generic dictionary type
-                return [String: Any].self
-            }
-            
-            // For now, return nil for unknown types
+            // Generic collections that the runtime fails to reconstruct (rare).
+            if name.hasPrefix("Swift.Array<") { return [Any].self }
+            if name.hasPrefix("Swift.Dictionary<") { return [String: Any].self }
             return nil
         }
     }

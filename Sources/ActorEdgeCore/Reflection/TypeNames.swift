@@ -1,37 +1,29 @@
 import Foundation
+@_spi(Reflection) import Swift
 
-// MARK: - Swift Runtime Functions
-
-// swift_getMangledTypeName is an internal stdlib function with ABI-stable symbol name
+// MARK: - Swift Runtime Functions (safe)
+// swift_getMangledTypeName is an ABI‑stable symbol that can still be used to obtain the mangled
+// name of a known type. It is *not* reserved in the same way as the context‑sensitive resolver,
+// so we keep it for diagnostic purposes only.
 @_silgen_name("swift_getMangledTypeName")
 @usableFromInline
 internal func _swift_getMangledTypeName(_ type: Any.Type,
-                                      _ qualified: Bool) -> UnsafePointer<UInt8>?
-
-// swift_getTypeByMangledNameInContext is used to resolve types from mangled names
-// This is declared in the Swift runtime but not exposed publicly
-@_silgen_name("swift_getTypeByMangledNameInContext")
-@usableFromInline
-internal func _swift_getTypeByMangledNameInContext(
-    _ name: UnsafePointer<UInt8>,
-    _ nameLength: Int,
-    _ context: UnsafeRawPointer?,
-    _ genericArgs: UnsafeRawPointer?
-) -> Any.Type?
+                                        _ qualified: Bool) -> UnsafePointer<UInt8>?
 
 // MARK: - Mangled Type Names
 
-/// Get the mangled type name for a type
-/// This uses Swift's internal API to get the ABI-stable mangled name
+/// Return the fully‑qualified *mangled* name for the supplied type, or `nil` if it cannot be
+/// obtained (for example, anonymous or generic contextual types).
 @usableFromInline
 internal func _mangledTypeName(_ type: Any.Type) -> String? {
     guard let ptr = _swift_getMangledTypeName(type, /*qualified:*/ true) else { return nil }
     return String(cString: ptr)
 }
 
-// MARK: - Type Name Utilities
+// MARK: - Demangled Type Names
 
-/// Get a human-readable type name (demangled)
+/// Human‑readable type name identical to `String(reflecting:)`, kept for consistency with the
+/// older API used throughout the codebase.
 @usableFromInline
 internal func _typeName(_ type: Any.Type) -> String {
     String(reflecting: type)

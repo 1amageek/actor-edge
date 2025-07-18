@@ -43,7 +43,7 @@ public enum PrivateKeySource: Sendable {
         case .bytes(let data, let format, let passphrase):
             if let passphrase = passphrase {
                 let passphraseBytes = Array(passphrase.utf8)
-                let callback: NIOSSLPassphraseCallback<[UInt8]> = { _ in passphraseBytes }
+                let callback: NIOSSLPassphraseCallback<[UInt8]> = { setter in setter(passphraseBytes) }
                 return try NIOSSLPrivateKey(bytes: Array(data), format: format.niosslFormat, passphraseCallback: callback)
             } else {
                 return try NIOSSLPrivateKey(bytes: Array(data), format: format.niosslFormat)
@@ -52,7 +52,7 @@ public enum PrivateKeySource: Sendable {
             let data = try Data(contentsOf: URL(fileURLWithPath: path))
             if let passphrase = passphrase {
                 let passphraseBytes = Array(passphrase.utf8)
-                let callback: NIOSSLPassphraseCallback<[UInt8]> = { _ in passphraseBytes }
+                let callback: NIOSSLPassphraseCallback<[UInt8]> = { setter in setter(passphraseBytes) }
                 return try NIOSSLPrivateKey(bytes: Array(data), format: format.niosslFormat, passphraseCallback: callback)
             } else {
                 return try NIOSSLPrivateKey(bytes: Array(data), format: format.niosslFormat)

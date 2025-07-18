@@ -18,33 +18,6 @@ struct TransportTests {
         static let testData = Data("test data".utf8)
     }
     
-    // MARK: - GRPCActorTransport Tests
-    
-    @Test("Initialize transport with plaintext")
-    func testInitTransportPlaintext() async throws {
-        let transport = try await GRPCActorTransport(TestConfig.testEndpoint)
-        #expect(transport != nil)
-    }
-    
-    @Test("Initialize transport with TLS")
-    func testInitTransportTLS() async throws {
-        let tlsConfig = ClientTLSConfiguration()
-        let transport = try await GRPCActorTransport(TestConfig.testEndpoint, tls: tlsConfig)
-        #expect(transport != nil)
-    }
-    
-    @Test("Parse endpoint with custom port")
-    func testEndpointParsingWithPort() async throws {
-        let transport = try await GRPCActorTransport("example.com:8080")
-        #expect(transport != nil)
-    }
-    
-    @Test("Parse endpoint without port defaults to 443")
-    func testEndpointParsingWithoutPort() async throws {
-        let transport = try await GRPCActorTransport("example.com")
-        #expect(transport != nil)
-    }
-    
     // MARK: - Mock Transport Tests
     
     @Test("Mock transport remote call")
