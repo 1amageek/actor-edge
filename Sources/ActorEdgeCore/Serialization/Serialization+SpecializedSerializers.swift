@@ -204,7 +204,14 @@ extension Serialization {
         init() {
             var serializers: [String: any AnySerializer] = [:]
             for (type, serializer) in Serialization.specializedSerializers {
-                serializers[String(reflecting: type)] = serializer
+                // Store both demangled and mangled names as keys
+                let demangledName = String(reflecting: type)
+                serializers[demangledName] = serializer
+                
+                // Also store with mangled name if available
+                if let mangledName = _mangledTypeName(type) {
+                    serializers[mangledName] = serializer
+                }
             }
             self.specializedSerializers = serializers
         }

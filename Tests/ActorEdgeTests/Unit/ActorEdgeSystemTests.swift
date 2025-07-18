@@ -137,9 +137,12 @@ struct ActorEdgeSystemTests {
     @Test("Remote call with result")
     func testRemoteCallWithResult() async throws {
         let transport = MockActorTransport()
-        transport.mockResponse = try JSONEncoder().encode("Hello from remote!")
         
+        // The response should be serialized using the same serialization system
         let system = ActorEdgeSystem(transport: transport)
+        let responseValue = "Hello from remote!"
+        let buffer = try system.serialization.serialize(responseValue, system: system)
+        transport.mockResponse = buffer.readData()
         var encoder = system.makeInvocationEncoder()
         try encoder.recordGenericSubstitution(String.self)
         

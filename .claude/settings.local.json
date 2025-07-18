@@ -27,7 +27,8 @@
       "Bash(./.build/debug/SampleChatClient:*)",
       "Bash(remark:*)",
       "WebFetch(domain:zenn.dev)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(find:*)"
     ],
     "deny": []
   }

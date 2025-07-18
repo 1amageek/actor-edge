@@ -85,14 +85,22 @@ public struct Serialization: Sendable {
         // Check if it's a specialized type
         if settings.hasSpecializedSerializer(for: type) {
             // Include hint for specialized types to support deserialization
-            return Manifest(serializerID: .specializedWithTypeHint, hint: String(reflecting: type))
+            return Manifest(serializerID: .specializedWithTypeHint, hint: Self.getTypeHint(type))
         }
         
         // Default to Codable with type hint
         return Manifest(
             serializerID: settings.defaultSerializerID,
-            hint: String(reflecting: type)
+            hint: Self.getTypeHint(type)
         )
+    }
+    
+    /// Get type hint for a type, preferring mangled name for correct deserialization
+    @inlinable
+    @inline(__always)
+    internal static func getTypeHint(_ messageType: Any.Type) -> String {
+        // Try mangled name first (required for generic types), fallback to readable name
+        _mangledTypeName(messageType) ?? _typeName(messageType)
     }
     
     /// Resolve a type from a manifest
@@ -107,7 +115,7 @@ public struct Serialization: Sendable {
             throw SerializationError.unknownManifest(manifest)
         }
         
-        // Try to resolve the type from hint
+        // Try to resolve the type from hint (could be mangled or demangled)
         if let type = ActorEdge._typeByName(hint) {
             return type
         }
@@ -137,9 +145,24 @@ public struct Serialization: Sendable {
 
 /// ActorEdge namespace for shared utilities
 public enum ActorEdge {
-    /// Resolve a type from its name (simplified version)
+    /// Resolve a type from its name (can be mangled or demangled)
     public static func _typeByName(_ name: String) -> Any.Type? {
-        // Try standard library types first
+        // First, try to resolve as a mangled name
+        let nameUTF8 = Array(name.utf8)
+        if let type = nameUTF8.withUnsafeBufferPointer({ buffer -> Any.Type? in
+            // Cast to UnsafePointer<UInt8> which is what the function expects
+            guard let baseAddress = buffer.baseAddress else { return nil }
+            return _swift_getTypeByMangledNameInContext(
+                baseAddress,
+                buffer.count,
+                nil,
+                nil
+            )
+        }) {
+            return type
+        }
+        
+        // If not a mangled name, try standard library types
         switch name {
         case "Swift.String": return String.self
         case "Swift.Int": return Int.self
@@ -169,7 +192,6 @@ public enum ActorEdge {
             }
             
             // For now, return nil for unknown types
-            // In the future, this could use runtime metadata APIs
             return nil
         }
     }
