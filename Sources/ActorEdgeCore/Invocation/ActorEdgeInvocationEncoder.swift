@@ -114,25 +114,4 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
         )
     }
     
-    /// Get all recorded data as a simple container (for legacy compatibility)
-    internal func getEncodedData() throws -> Data {
-        let envelope = InvocationEnvelope(
-            arguments: arguments,
-            genericSubstitutions: genericSubstitutions,
-            returnType: returnTypeInfo,
-            errorType: errorTypeInfo
-        )
-        // Use serialization system for consistency
-        let buffer = try serialization.serialize(envelope)
-        return buffer.readData()
-    }
-}
-
-/// Legacy container for backward compatibility
-/// Will be removed once all systems use InvocationMessage
-private struct InvocationEnvelope: Codable {
-    let arguments: [Data]
-    let genericSubstitutions: [String]
-    let returnType: String?
-    let errorType: String?
 }

@@ -136,14 +136,19 @@ public final class ActorEdgeSystem: DistributedActorSystem {
         
         try invocation.doneRecording()
         
-        // For now, use legacy approach until we implement new Promise-based pattern
-        let arguments = try invocation.getEncodedData()
+        // Create InvocationMessage for modern approach
+        let encoder = invocation
+        
+        let message = try encoder.createInvocationMessage(targetIdentifier: target.identifier)
+        let messageBuffer = try serialization.serialize(message)
+        let messageData = messageBuffer.readData()
+        
         let context = ServiceContext.current ?? ServiceContext.topLevel
         
         let resultData = try await transport.remoteCall(
             on: actor.id,
             method: target.identifier,
-            arguments: arguments,
+            arguments: messageData,
             context: context
         )
         
@@ -169,14 +174,19 @@ public final class ActorEdgeSystem: DistributedActorSystem {
         
         try invocation.doneRecording()
         
-        // For now, use legacy approach until we implement new Promise-based pattern
-        let arguments = try invocation.getEncodedData()
+        // Create InvocationMessage for modern approach
+        let encoder = invocation
+        
+        let message = try encoder.createInvocationMessage(targetIdentifier: target.identifier)
+        let messageBuffer = try serialization.serialize(message)
+        let messageData = messageBuffer.readData()
+        
         let context = ServiceContext.current ?? ServiceContext.topLevel
         
         try await transport.remoteCallVoid(
             on: actor.id,
             method: target.identifier,
-            arguments: arguments,
+            arguments: messageData,
             context: context
         )
     }

@@ -36,25 +36,14 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
         self.state = .localCall(encoder)
     }
     
-    /// Legacy initialization for backward compatibility
+    /// Initialize from serialized payload
     public init(system: ActorEdgeSystem, payload: Data) throws {
         self.system = system
         
-        // Try to decode as InvocationMessage first
+        // Decode as InvocationMessage
         let buffer = SerializationBuffer.data(payload)
-        if let message = try? system.serialization.deserialize(InvocationMessage.self, from: buffer) {
-            self.state = .remoteCall(message)
-        } else {
-            // Fallback to legacy envelope format
-            let envelope = try system.serialization.deserialize(InvocationEnvelope.self, from: buffer)
-            let message = InvocationMessage(
-                callID: CallIDGenerator.generate(),
-                targetIdentifier: "unknown",
-                genericSubstitutions: envelope.genericSubstitutions,
-                arguments: envelope.arguments
-            )
-            self.state = .remoteCall(message)
-        }
+        let message = try system.serialization.deserialize(InvocationMessage.self, from: buffer)
+        self.state = .remoteCall(message)
     }
     
     // MARK: - DistributedTargetInvocationDecoder Implementation
@@ -153,13 +142,4 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
             return nil
         }
     }
-}
-
-/// Legacy container for backward compatibility
-/// Will be removed once all systems use InvocationMessage
-private struct InvocationEnvelope: Codable {
-    let arguments: [Data]
-    let genericSubstitutions: [String]
-    let returnType: String?
-    let errorType: String?
 }
