@@ -16,16 +16,21 @@ public struct InvocationMessage: Codable, Sendable {
     /// Serialized arguments
     public let arguments: [Data]
     
+    /// Manifests describing the type of each argument
+    public let argumentManifests: [Serialization.Manifest]
+    
     public init(
         callID: String,
         targetIdentifier: String,
         genericSubstitutions: [String],
-        arguments: [Data]
+        arguments: [Data],
+        argumentManifests: [Serialization.Manifest] = []
     ) {
         self.callID = callID
         self.targetIdentifier = targetIdentifier
         self.genericSubstitutions = genericSubstitutions
         self.arguments = arguments
+        self.argumentManifests = argumentManifests
     }
     
     /// Convert to RemoteCallTarget

@@ -18,7 +18,7 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
     private var argumentIndex: Int = 0
     
     /// Serialization system for decoding arguments
-    private var serialization: ActorEdgeSerialization {
+    private var serialization: Serialization {
         system.serialization
     }
     
@@ -41,8 +41,8 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
         self.system = system
         
         // Decode as InvocationMessage
-        let buffer = SerializationBuffer.data(payload)
-        let message = try system.serialization.deserialize(InvocationMessage.self, from: buffer)
+        let buffer = Serialization.Buffer.data(payload)
+        let message = try system.serialization.deserialize(buffer, as: InvocationMessage.self, system: system)
         self.state = .remoteCall(message)
     }
     
@@ -67,7 +67,8 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
         // Handle generic type resolution with graceful fallback
         var types: [Any.Type] = []
         for typeName in substitutions {
-            if let type = TypeResolver.resolveType(from: typeName) {
+            // Try to resolve type using _typeByName (will be improved later)
+            if let type = ActorEdge._typeByName(typeName) {
                 types.append(type)
             } else {
                 // Log warning and use Any.self as fallback instead of throwing
@@ -82,6 +83,7 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
     public mutating func decodeNextArgument<Argument>() throws -> Argument 
     where Argument: SerializationRequirement {
         let argumentData: Data
+        let manifest: Serialization.Manifest?
         
         switch state {
         case .remoteCall(let message):
@@ -91,6 +93,7 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
                 )
             }
             argumentData = message.arguments[argumentIndex]
+            manifest = argumentIndex < message.argumentManifests.count ? message.argumentManifests[argumentIndex] : nil
             
         case .localCall(let encoder):
             guard argumentIndex < encoder.arguments.count else {
@@ -99,14 +102,40 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
                 )
             }
             argumentData = encoder.arguments[argumentIndex]
+            manifest = argumentIndex < encoder.manifests.count ? encoder.manifests[argumentIndex] : nil
         }
         
+        let currentIndex = argumentIndex
         argumentIndex += 1
         
-        // Decode the argument using ActorEdgeSerialization
-        // This automatically sets userInfo[.actorSystemKey] for distributed actor arguments
-        let buffer = SerializationBuffer.data(argumentData)
-        return try serialization.deserialize(Argument.self, from: buffer)
+        // Decode the argument using Serialization with manifest if available
+        let buffer = Serialization.Buffer.data(argumentData)
+        
+        if let manifest = manifest {
+            // Use manifest-based deserialization
+            let value = try serialization.deserialize(buffer: buffer, using: manifest, system: system)
+            
+            // Check if we got the expected type directly
+            if let typedValue = value as? Argument {
+                return typedValue
+            }
+            
+            // If we got Data (from unknown type deserialization), decode it to the expected type
+            if let data = value as? Data {
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .iso8601
+                decoder.dataDecodingStrategy = .base64
+                decoder.userInfo[.actorSystemKey] = system
+                return try decoder.decode(Argument.self, from: data)
+            }
+            
+            throw ActorEdgeError.deserializationFailed(
+                "Argument \(currentIndex) is not of expected type \(Argument.self), got \(type(of: value))"
+            )
+        } else {
+            // Fallback to type-based deserialization
+            return try serialization.deserialize(buffer, as: Argument.self, system: system)
+        }
     }
     
     public mutating func decodeReturnType() throws -> Any.Type? {
@@ -119,6 +148,51 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
         // Error type decoding is not implemented in swift-distributed-actors either  
         // This method exists for protocol conformance but returns nil
         return nil
+    }
+    
+    /// Decode the next argument with a specific type (type-erased)
+    public mutating func decodeNextArgument(as type: Any.Type) throws -> Any {
+        let argumentData: Data
+        let manifest: Serialization.Manifest?
+        
+        switch state {
+        case .remoteCall(let message):
+            guard argumentIndex < message.arguments.count else {
+                throw ActorEdgeError.deserializationFailed(
+                    "Not enough arguments: expected \(argumentIndex + 1), have \(message.arguments.count)"
+                )
+            }
+            argumentData = message.arguments[argumentIndex]
+            manifest = argumentIndex < message.argumentManifests.count ? message.argumentManifests[argumentIndex] : nil
+            
+        case .localCall(let encoder):
+            guard argumentIndex < encoder.arguments.count else {
+                throw ActorEdgeError.deserializationFailed(
+                    "Not enough arguments: expected \(argumentIndex + 1), have \(encoder.arguments.count)"
+                )
+            }
+            argumentData = encoder.arguments[argumentIndex]
+            manifest = argumentIndex < encoder.manifests.count ? encoder.manifests[argumentIndex] : nil
+        }
+        
+        argumentIndex += 1
+        
+        // Decode using manifest if available
+        let buffer = Serialization.Buffer.data(argumentData)
+        
+        if let manifest = manifest {
+            // Use manifest-based deserialization
+            return try serialization.deserialize(buffer: buffer, using: manifest, system: system)
+        } else {
+            // Fallback to type-erased deserialization
+            guard let codableType = type as? any (Codable & Sendable).Type else {
+                throw ActorEdgeError.deserializationFailed(
+                    "Type \(type) does not conform to Codable & Sendable"
+                )
+            }
+            
+            return try serialization.deserializeErased(codableType, from: buffer, userInfo: [:], system: system)
+        }
     }
     
     // MARK: - Internal Access Methods
@@ -142,4 +216,15 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
             return nil
         }
     }
+    
+    /// Get the argument manifests from the invocation (if available)
+    internal var argumentManifests: [Serialization.Manifest]? {
+        switch state {
+        case .remoteCall(let message):
+            return message.argumentManifests
+        case .localCall(let encoder):
+            return encoder.manifests
+        }
+    }
 }
+

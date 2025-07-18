@@ -11,6 +11,9 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
     /// Serialized arguments as Data array
     private(set) var arguments: [Data] = []
     
+    /// Manifests for each argument
+    private(set) var manifests: [Serialization.Manifest] = []
+    
     /// Generic type substitutions as mangled type names
     private(set) var genericSubstitutions: [String] = []
     
@@ -30,7 +33,7 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
     private let system: ActorEdgeSystem
     
     /// Serialization system for encoding arguments
-    private var serialization: ActorEdgeSerialization {
+    private var serialization: Serialization {
         system.serialization
     }
     
@@ -60,9 +63,10 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
             throw ActorEdgeError.invocationError("Cannot record after doneRecording()")
         }
         
-        // Serialize argument value using ActorEdgeSerialization
-        let buffer = try serialization.serialize(argument.value)
+        // Serialize argument value with manifest using ActorEdgeSerialization
+        let (buffer, manifest) = try serialization.serializeWithManifest(argument.value, system: system)
         arguments.append(buffer.readData())
+        manifests.append(manifest)
     }
     
     public mutating func recordReturnType<R>(
@@ -110,7 +114,8 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
             callID: callID,
             targetIdentifier: targetIdentifier,
             genericSubstitutions: genericSubstitutions,
-            arguments: arguments
+            arguments: arguments,
+            argumentManifests: manifests
         )
     }
     

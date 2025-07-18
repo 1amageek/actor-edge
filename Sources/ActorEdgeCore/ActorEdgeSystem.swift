@@ -18,7 +18,7 @@ public final class ActorEdgeSystem: DistributedActorSystem {
     public let registry: ActorRegistry?
     
     /// The serialization system for this actor system
-    public let serialization: ActorEdgeSerialization
+    public let serialization: Serialization
     
     // Metrics
     private let distributedCallsCounter: Counter
@@ -31,15 +31,13 @@ public final class ActorEdgeSystem: DistributedActorSystem {
         self.logger = Logger(label: "ActorEdge.System")
         self.isServer = false
         self.registry = nil
-        self.serialization = ActorEdgeSerialization()
+        // Initialize serialization
+        self.serialization = Serialization()
         
         // Initialize metrics
         self.metricNames = MetricNames(namespace: metricsNamespace)
         self.distributedCallsCounter = Counter(label: metricNames.distributedCallsTotal)
         self.methodInvocationsCounter = Counter(label: metricNames.methodInvocationsTotal)
-        
-        // Set system after all properties are initialized
-        self.serialization.setSystem(self)
     }
     
     /// Create a server-side actor system without transport
@@ -48,15 +46,13 @@ public final class ActorEdgeSystem: DistributedActorSystem {
         self.logger = Logger(label: "ActorEdge.System")
         self.isServer = true
         self.registry = ActorRegistry()
-        self.serialization = ActorEdgeSerialization()
+        // Initialize serialization
+        self.serialization = Serialization()
         
         // Initialize metrics
         self.metricNames = MetricNames(namespace: metricsNamespace)
         self.distributedCallsCounter = Counter(label: metricNames.distributedCallsTotal)
         self.methodInvocationsCounter = Counter(label: metricNames.methodInvocationsTotal)
-        
-        // Set system after all properties are initialized
-        self.serialization.setSystem(self)
     }
     
     public func resolve<Act>(id: ActorID, as actorType: Act.Type) throws -> Act? 
@@ -143,7 +139,7 @@ public final class ActorEdgeSystem: DistributedActorSystem {
         let encoder = invocation
         
         let message = try encoder.createInvocationMessage(targetIdentifier: target.identifier)
-        let messageBuffer = try serialization.serialize(message)
+        let messageBuffer = try serialization.serialize(message, system: self)
         let messageData = messageBuffer.readData()
         
         let context = ServiceContext.current ?? ServiceContext.topLevel
@@ -155,8 +151,8 @@ public final class ActorEdgeSystem: DistributedActorSystem {
             context: context
         )
         
-        let buffer = SerializationBuffer.data(resultData)
-        return try serialization.deserialize(Res.self, from: buffer)
+        let buffer = Serialization.Buffer.data(resultData)
+        return try serialization.deserialize(buffer, as: Res.self, system: self)
     }
     
     public func remoteCallVoid<Act, Err>(
@@ -184,7 +180,7 @@ public final class ActorEdgeSystem: DistributedActorSystem {
         let encoder = invocation
         
         let message = try encoder.createInvocationMessage(targetIdentifier: target.identifier)
-        let messageBuffer = try serialization.serialize(message)
+        let messageBuffer = try serialization.serialize(message, system: self)
         let messageData = messageBuffer.readData()
         
         let context = ServiceContext.current ?? ServiceContext.topLevel
@@ -309,10 +305,11 @@ public final class ActorEdgeSystem: DistributedActorSystem {
         // For distributed methods, they typically contain the method name in readable form
         
         // Extract method name using Swift runtime patterns
+        // With manifests, we don't need to infer parameter types
         if identifier.contains("send") {
             return DistributedMethodInfo(
                 name: "send",
-                parameterTypes: [extractGenericParameterType(from: identifier) ?? Data.self],
+                parameterTypes: [], // Empty - will be determined by manifests
                 returnType: Void.self,
                 isVoid: true,
                 methodSignature: identifier
@@ -322,8 +319,8 @@ public final class ActorEdgeSystem: DistributedActorSystem {
         if identifier.contains("getRecentMessages") {
             return DistributedMethodInfo(
                 name: "getRecentMessages",
-                parameterTypes: [Int.self],
-                returnType: Array<Data>.self, // Generic return type
+                parameterTypes: [], // Empty - will be determined by manifests
+                returnType: Data.self, // Generic return type will be handled by result handler
                 isVoid: false,
                 methodSignature: identifier
             )
@@ -332,8 +329,8 @@ public final class ActorEdgeSystem: DistributedActorSystem {
         if identifier.contains("getMessagesSince") {
             return DistributedMethodInfo(
                 name: "getMessagesSince",
-                parameterTypes: [Date.self, String.self],
-                returnType: Array<Data>.self, // Generic return type
+                parameterTypes: [], // Empty - will be determined by manifests
+                returnType: Data.self, // Generic return type will be handled by result handler
                 isVoid: false,
                 methodSignature: identifier
             )
@@ -349,12 +346,6 @@ public final class ActorEdgeSystem: DistributedActorSystem {
         return nil
     }
     
-    /// Extract generic parameter type from mangled name (simplified)
-    private func extractGenericParameterType(from mangledName: String) -> Any.Type? {
-        // In a full implementation, this would parse Swift generic substitutions
-        // For now, return a safe default
-        return Data.self
-    }
     
     // MARK: - Apple Specification Step 2: Efficient Argument Decoding
     
@@ -366,28 +357,61 @@ public final class ActorEdgeSystem: DistributedActorSystem {
     ) throws -> [Any] {
         var arguments: [Any] = []
         
+        // Get manifests from decoder if available
+        let manifests = decoder.argumentManifests ?? []
+        
         logger.debug("Decoding arguments", metadata: [
-            "parameterCount": "\(methodInfo.parameterTypes.count)"
+            "parameterCount": "\(methodInfo.parameterTypes.count)",
+            "manifestCount": "\(manifests.count)"
         ])
         
-        // Decode each argument according to its expected type
-        for (index, parameterType) in methodInfo.parameterTypes.enumerated() {
-            do {
-                let argument = try decodeTypedArgument(
-                    decoder: &decoder,
-                    type: parameterType,
-                    index: index
-                )
-                arguments.append(argument)
-            } catch {
-                logger.error("Failed to decode argument", metadata: [
-                    "index": "\(index)",
-                    "type": "\(parameterType)",
-                    "error": "\(error)"
-                ])
-                throw ActorEdgeError.deserializationFailed(
-                    "Failed to decode argument \(index) of type \(parameterType): \(error)"
-                )
+        // Use manifests if available, otherwise fall back to old behavior
+        if !manifests.isEmpty {
+            // Manifest-based decoding
+            for (index, manifest) in manifests.enumerated() {
+                do {
+                    // Resolve actual type from manifest
+                    let realType = try serialization.summonType(from: manifest)
+                    
+                    logger.debug("Decoding argument with manifest", metadata: [
+                        "index": "\(index)",
+                        "typeName": "\(manifest.hint ?? "no-hint")",
+                        "resolvedType": "\(realType)"
+                    ])
+                    
+                    let argument = try decoder.decodeNextArgument(as: realType)
+                    arguments.append(argument)
+                } catch {
+                    logger.error("Failed to decode argument", metadata: [
+                        "index": "\(index)",
+                        "manifest": "\(manifest)",
+                        "error": "\(error)"
+                    ])
+                    throw ActorEdgeError.deserializationFailed(
+                        "Failed to decode argument \(index) with manifest \(manifest): \(error)"
+                    )
+                }
+            }
+        } else {
+            // Legacy decoding for backward compatibility
+            for (index, parameterType) in methodInfo.parameterTypes.enumerated() {
+                do {
+                    let argument = try decodeTypedArgument(
+                        decoder: &decoder,
+                        type: parameterType,
+                        index: index
+                    )
+                    arguments.append(argument)
+                } catch {
+                    logger.error("Failed to decode argument", metadata: [
+                        "index": "\(index)",
+                        "type": "\(parameterType)",
+                        "error": "\(error)"
+                    ])
+                    throw ActorEdgeError.deserializationFailed(
+                        "Failed to decode argument \(index) of type \(parameterType): \(error)"
+                    )
+                }
             }
         }
         
