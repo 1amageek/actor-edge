@@ -89,13 +89,34 @@ public final class GRPCActorTransport: ActorTransport, Sendable {
         // Get event loop for this call
         let eventLoop = self.eventLoop
         
-        // Register call with lifecycle manager
+        // Register call with lifecycle manager on the EventLoop
         let timeout = TimeAmount.seconds(30) // TODO: Make configurable
-        let future = try callLifecycleManager.register(
-            callID: callID,
-            eventLoop: eventLoop,
-            timeout: timeout
-        )
+        let future: EventLoopFuture<ByteBuffer>
+        
+        if eventLoop.inEventLoop {
+            // Already on the EventLoop, register directly
+            future = try callLifecycleManager.register(
+                callID: callID,
+                eventLoop: eventLoop,
+                timeout: timeout
+            )
+        } else {
+            // Need to hop to the EventLoop
+            let promise = eventLoop.makePromise(of: ByteBuffer.self)
+            eventLoop.execute {
+                do {
+                    let registeredFuture = try self.callLifecycleManager.register(
+                        callID: callID,
+                        eventLoop: eventLoop,
+                        timeout: timeout
+                    )
+                    registeredFuture.cascade(to: promise)
+                } catch {
+                    promise.fail(error)
+                }
+            }
+            future = promise.futureResult
+        }
         
         // Make the gRPC call in background
         Task {

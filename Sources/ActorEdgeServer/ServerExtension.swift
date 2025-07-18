@@ -16,7 +16,6 @@ public extension Server {
     /// Main entry point for ActorEdge servers
     static func main() async throws {
         // Initialize logging
-        LoggingSystem.bootstrap(StreamLogHandler.standardOutput)
         let logger = Logger(label: "ActorEdge.Server")
         
         logger.info("Starting ActorEdge server...")

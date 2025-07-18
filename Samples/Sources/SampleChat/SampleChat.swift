@@ -27,6 +27,14 @@ struct SampleChat {
             struct SimpleServer: Server {
                 var port: Int { 8000 }
                 var host: String { "127.0.0.1" }
+                
+                // Provide well-known actor IDs
+                var actorIDs: [String] { ["chat-server"] }
+                
+                @ActorBuilder
+                func actors(actorSystem: ActorEdgeSystem) -> [any DistributedActor] {
+                    ChatServer(actorSystem: actorSystem)
+                }
             }
             
             try await SimpleServer.main()
@@ -39,8 +47,8 @@ struct SampleChat {
         let transport = try await GRPCActorTransport("127.0.0.1:8000")
         let system = ActorEdgeSystem(transport: transport)
         
-        // Resolve the chat actor
-        let chat = try $Chat.resolve(id: ActorEdgeID(), using: system)
+        // Resolve the chat actor with well-known ID
+        let chat = try $Chat.resolve(id: ActorEdgeID("chat-server"), using: system)
         
         logger.info("Connected to chat server")
         
@@ -89,6 +97,12 @@ distributed actor ChatServer: Chat {
     
     init(actorSystem: ActorSystem) {
         self.actorSystem = actorSystem
+        let actorID = self.id
+        Task {
+            // Print the actor ID for debugging
+            try await Task.sleep(nanoseconds: 100_000_000) // Small delay to ensure ID is assigned
+            Logger(label: "ChatServer").info("ChatActor initialized with ID: \(actorID)")
+        }
     }
     
     // MARK: - Chat Implementation

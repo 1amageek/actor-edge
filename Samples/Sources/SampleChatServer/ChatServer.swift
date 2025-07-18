@@ -69,6 +69,7 @@ struct ChatServer: Server {
     // Provide well-known IDs for our actors
     var actorIDs: [String] { ["chat-server"] }
   
+    @ActorBuilder
     func actors(actorSystem: ActorEdgeSystem) -> [any DistributedActor] {
         ChatActor(actorSystem: actorSystem)
     }

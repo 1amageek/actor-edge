@@ -134,7 +134,10 @@ public final class ActorEdgeSystem: DistributedActorSystem {
         // Update metrics
         distributedCallsCounter.increment()
         
-        try invocation.doneRecording()
+        // Check if doneRecording() has already been called
+        if invocation.state == .recording {
+            try invocation.doneRecording()
+        }
         
         // Create InvocationMessage for modern approach
         let encoder = invocation
@@ -172,7 +175,10 @@ public final class ActorEdgeSystem: DistributedActorSystem {
         // Update metrics
         distributedCallsCounter.increment()
         
-        try invocation.doneRecording()
+        // Check if doneRecording() has already been called
+        if invocation.state == .recording {
+            try invocation.doneRecording()
+        }
         
         // Create InvocationMessage for modern approach
         let encoder = invocation

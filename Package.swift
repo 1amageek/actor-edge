@@ -30,9 +30,9 @@ let package = Package(
         // Networking
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.84.0"),
         .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.32.0"),
-        .package(url: "https://github.com/grpc/grpc-swift-2.git", exact: "2.2.3"),
-        .package(url: "https://github.com/grpc/grpc-swift-nio-transport.git", exact: "2.2.3"),
-        .package(url: "https://github.com/grpc/grpc-swift-protobuf.git", exact: "2.2.3"),
+        .package(url: "https://github.com/grpc/grpc-swift-2.git", exact: "2.0.0"),
+        .package(url: "https://github.com/grpc/grpc-swift-nio-transport.git", exact: "2.0.0"),
+        .package(url: "https://github.com/grpc/grpc-swift-protobuf.git", exact: "2.0.0"),
         // .package(url: "https://github.com/grpc/grpc-swift-extras.git", branch: "main"),
         .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.30.0"),
         

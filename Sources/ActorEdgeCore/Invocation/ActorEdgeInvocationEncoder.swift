@@ -24,7 +24,7 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
     private(set) var throwing: Bool = false
     
     /// Current encoding state
-    private var state: InvocationEncoderState = .recording
+    internal private(set) var state: InvocationEncoderState = .recording
     
     /// Reference to the actor system for serialization
     private let system: ActorEdgeSystem
