@@ -42,7 +42,7 @@ struct ActorEdgeSystemTests {
     
     @Test("Client-side system initialization")
     func testClientSystemInitialization() async throws {
-        let transport = MockActorTransport()
+        let transport = MockMessageTransport()
         let system = ActorEdgeSystem(transport: transport)
         
         #expect(system.isServer == false)
@@ -98,7 +98,7 @@ struct ActorEdgeSystemTests {
     
     @Test("Actor ready lifecycle on client")
     func testActorReadyClient() async throws {
-        let transport = MockActorTransport()
+        let transport = MockMessageTransport()
         let system = ActorEdgeSystem(transport: transport)
         
         // Create actor on client side
@@ -136,13 +136,22 @@ struct ActorEdgeSystemTests {
     
     @Test("Remote call with result")
     func testRemoteCallWithResult() async throws {
-        let transport = MockActorTransport()
+        let transport = MockMessageTransport()
         
         // The response should be serialized using the same serialization system
         let system = ActorEdgeSystem(transport: transport)
         let responseValue = "Hello from remote!"
-        let buffer = try system.serialization.serialize(responseValue, system: system)
-        transport.mockResponse = buffer.readData()
+        let buffer = try system.serialization.serialize(responseValue)
+        
+        // Create response envelope
+        let responseEnvelope = Envelope.response(
+            to: ActorEdgeID(),  // Will be set by mock
+            callID: "",  // Will be captured from request
+            manifest: SerializationManifest(serializerID: "json"),
+            payload: buffer.data
+        )
+        transport.mockResponse = responseEnvelope
+        
         var encoder = system.makeInvocationEncoder()
         try encoder.recordGenericSubstitution(String.self)
         
@@ -157,12 +166,12 @@ struct ActorEdgeSystemTests {
         )
         
         #expect(result == "Hello from remote!")
-        #expect(transport.lastMethodCalled == "getName")
+        #expect(transport.lastEnvelope?.metadata.target == "getName")
     }
     
     @Test("Remote call void")
     func testRemoteCallVoid() async throws {
-        let transport = MockActorTransport()
+        let transport = MockMessageTransport()
         let system = ActorEdgeSystem(transport: transport)
         var encoder = system.makeInvocationEncoder()
         
@@ -175,7 +184,7 @@ struct ActorEdgeSystemTests {
             throwing: Never.self
         )
         
-        #expect(transport.lastMethodCalled == "doSomething")
+        #expect(transport.lastEnvelope?.metadata.target == "doSomething")
         #expect(transport.voidCallCount == 1)
     }
     
@@ -204,11 +213,20 @@ struct ActorEdgeSystemTests {
     
     @Test("Service context propagation in remote calls")
     func testServiceContextPropagation() async throws {
-        let transport = MockActorTransport()
-        transport.mockResponse = try JSONEncoder().encode("OK")
+        let transport = MockMessageTransport()
         
         let system = ActorEdgeSystem(transport: transport)
         var encoder = system.makeInvocationEncoder()
+        
+        // Set up response
+        let buffer = try system.serialization.serialize("OK")
+        let responseEnvelope = Envelope.response(
+            to: ActorEdgeID(),
+            callID: "",
+            manifest: SerializationManifest(serializerID: "json"),
+            payload: buffer.data
+        )
+        transport.mockResponse = responseEnvelope
         
         // Set up service context
         var context = ServiceContext.topLevel
@@ -226,7 +244,8 @@ struct ActorEdgeSystemTests {
             )
         }
         
-        #expect(transport.lastContext?[TestContextKey.self] == "test-value")
+        // Verify context was propagated in envelope headers
+        #expect(transport.lastEnvelope?.metadata.headers["test-context-key"] == "test-value")
     }
     
     // MARK: - Multiple System Instance Tests
@@ -260,74 +279,7 @@ struct ActorEdgeSystemTests {
     }
 }
 
-// MARK: - Mock Transport
-
-/// Mock transport for testing
-final class MockActorTransport: ActorTransport, @unchecked Sendable {
-    var mockResponse: Data = Data()
-    var lastMethodCalled: String?
-    var lastActorID: ActorEdgeID?
-    var lastArguments: Data?
-    var lastContext: ServiceContext?
-    var voidCallCount = 0
-    var shouldThrowError = false
-    
-    func remoteCall(
-        on actorID: ActorEdgeID,
-        method: String,
-        arguments: Data,
-        context: ServiceContext
-    ) async throws -> Data {
-        if shouldThrowError {
-            throw ActorEdgeError.transportError("Mock error")
-        }
-        
-        lastMethodCalled = method
-        lastActorID = actorID
-        lastArguments = arguments
-        lastContext = context
-        
-        return mockResponse
-    }
-    
-    func remoteCallVoid(
-        on actorID: ActorEdgeID,
-        method: String,
-        arguments: Data,
-        context: ServiceContext
-    ) async throws {
-        if shouldThrowError {
-            throw ActorEdgeError.transportError("Mock error")
-        }
-        
-        lastMethodCalled = method
-        lastActorID = actorID
-        lastArguments = arguments
-        lastContext = context
-        voidCallCount += 1
-    }
-    
-    func streamCall(
-        on actorID: ActorEdgeID,
-        method: String,
-        arguments: Data,
-        context: ServiceContext
-    ) async throws -> AsyncThrowingStream<Data, any Error> {
-        if shouldThrowError {
-            throw ActorEdgeError.transportError("Mock error")
-        }
-        
-        lastMethodCalled = method
-        lastActorID = actorID
-        lastArguments = arguments
-        lastContext = context
-        
-        return AsyncThrowingStream<Data, any Error> { continuation in
-            continuation.yield(mockResponse)
-            continuation.finish()
-        }
-    }
-}
+// MockMessageTransport is imported from TestUtilities.swift
 
 // MARK: - Test Context Key
 

@@ -16,6 +16,7 @@ struct TransportTests {
         static let testActorID = ActorEdgeID()
         static let testMethod = "testMethod"
         static let testData = Data("test data".utf8)
+        static let testCallID = "test-call-123"
     }
     
     // MARK: - Mock Transport Tests
@@ -24,59 +25,82 @@ struct TransportTests {
     func testMockTransportRemoteCall() async throws {
         let transport = MockTransport()
         let expectedResponse = Data("response".utf8)
-        transport.mockResponse = expectedResponse
         
-        let context = ServiceContext.topLevel
-        let response = try await transport.remoteCall(
-            on: TestConfig.testActorID,
-            method: TestConfig.testMethod,
-            arguments: TestConfig.testData,
-            context: context
+        // Create response envelope
+        let responseEnvelope = Envelope.response(
+            to: TestConfig.testActorID,
+            callID: TestConfig.testCallID,
+            manifest: SerializationManifest(serializerID: "json"),
+            payload: expectedResponse
+        )
+        transport.mockResponse = responseEnvelope
+        
+        // Create request envelope
+        let requestEnvelope = Envelope.invocation(
+            to: TestConfig.testActorID,
+            target: TestConfig.testMethod,
+            callID: TestConfig.testCallID,
+            manifest: SerializationManifest(serializerID: "json"),
+            payload: TestConfig.testData
         )
         
-        #expect(response == expectedResponse)
-        #expect(transport.lastActorID == TestConfig.testActorID)
-        #expect(transport.lastMethod == TestConfig.testMethod)
-        #expect(transport.lastArguments == TestConfig.testData)
+        let response = try await transport.send(requestEnvelope)
+        
+        #expect(response?.payload == expectedResponse)
+        #expect(transport.lastEnvelope?.recipient == TestConfig.testActorID)
+        #expect(transport.lastEnvelope?.metadata.target == TestConfig.testMethod)
+        #expect(transport.lastEnvelope?.payload == TestConfig.testData)
     }
     
     @Test("Mock transport remote call void")
     func testMockTransportRemoteCallVoid() async throws {
         let transport = MockTransport()
-        let context = ServiceContext.topLevel
         
-        try await transport.remoteCallVoid(
-            on: TestConfig.testActorID,
-            method: TestConfig.testMethod,
-            arguments: TestConfig.testData,
-            context: context
+        // Create request envelope for void call
+        let requestEnvelope = Envelope.invocation(
+            to: TestConfig.testActorID,
+            target: TestConfig.testMethod,
+            callID: TestConfig.testCallID,
+            manifest: SerializationManifest(serializerID: "json"),
+            payload: TestConfig.testData
         )
         
+        let response = try await transport.send(requestEnvelope)
+        
+        #expect(response == nil) // Void calls return nil
         #expect(transport.voidCallCount == 1)
-        #expect(transport.lastActorID == TestConfig.testActorID)
-        #expect(transport.lastMethod == TestConfig.testMethod)
+        #expect(transport.lastEnvelope?.recipient == TestConfig.testActorID)
+        #expect(transport.lastEnvelope?.metadata.target == TestConfig.testMethod)
     }
     
-    @Test("Mock transport stream call")
-    func testMockTransportStreamCall() async throws {
+    @Test("Mock transport stream receive")
+    func testMockTransportStreamReceive() async throws {
         let transport = MockTransport()
         let streamData = [Data("chunk1".utf8), Data("chunk2".utf8), Data("chunk3".utf8)]
-        transport.mockStreamData = streamData
         
-        let context = ServiceContext.topLevel
-        let stream = try await transport.streamCall(
-            on: TestConfig.testActorID,
-            method: TestConfig.testMethod,
-            arguments: TestConfig.testData,
-            context: context
-        )
-        
-        var receivedChunks: [Data] = []
-        for try await chunk in stream {
-            receivedChunks.append(chunk)
+        // Enqueue stream envelopes
+        for (index, data) in streamData.enumerated() {
+            let envelope = Envelope.invocation(
+                to: TestConfig.testActorID,
+                target: "stream-\(index)",
+                manifest: SerializationManifest(serializerID: "json"),
+                payload: data
+            )
+            transport.enqueueReceiveEnvelope(envelope)
         }
         
-        #expect(receivedChunks == streamData)
+        let stream = transport.receive()
+        var receivedEnvelopes: [Envelope] = []
+        
+        for await envelope in stream {
+            receivedEnvelopes.append(envelope)
+            if receivedEnvelopes.count == streamData.count {
+                break
+            }
+        }
+        
+        #expect(receivedEnvelopes.count == streamData.count)
+        #expect(receivedEnvelopes.map { $0.payload } == streamData)
     }
     
     @Test("Mock transport error handling")
@@ -84,52 +108,60 @@ struct TransportTests {
         let transport = MockTransport()
         transport.shouldThrowError = true
         
-        let context = ServiceContext.topLevel
+        let requestEnvelope = Envelope.invocation(
+            to: TestConfig.testActorID,
+            target: TestConfig.testMethod,
+            manifest: SerializationManifest(serializerID: "json"),
+            payload: TestConfig.testData
+        )
         
         do {
-            _ = try await transport.remoteCall(
-                on: TestConfig.testActorID,
-                method: TestConfig.testMethod,
-                arguments: TestConfig.testData,
-                context: context
-            )
+            _ = try await transport.send(requestEnvelope)
             #expect(Bool(false), "Should have thrown an error")
         } catch {
-            #expect(error is ActorEdgeError)
+            #expect(error is TransportError)
         }
     }
     
     // MARK: - Service Context Propagation Tests
     
-    @Test("Service context propagation through transport")
+    @Test("Service context propagation through envelope headers")
     func testServiceContextPropagation() async throws {
         let transport = MockTransport()
         
-        // Create a context with custom values
-        var context = ServiceContext.topLevel
-        context[TestTraceIDKey.self] = "test-trace-123"
-        
-        _ = try await transport.remoteCall(
-            on: TestConfig.testActorID,
-            method: TestConfig.testMethod,
-            arguments: TestConfig.testData,
-            context: context
+        // Create envelope with context headers
+        let requestEnvelope = Envelope.invocation(
+            to: TestConfig.testActorID,
+            target: TestConfig.testMethod,
+            manifest: SerializationManifest(serializerID: "json"),
+            payload: TestConfig.testData,
+            headers: [
+                "trace-id": "test-trace-123",
+                "correlation-id": "test-correlation-456"
+            ]
         )
         
-        #expect(transport.lastContext?[TestTraceIDKey.self] == "test-trace-123")
+        _ = try await transport.send(requestEnvelope)
+        
+        #expect(transport.lastEnvelope?.metadata.headers["trace-id"] == "test-trace-123")
+        #expect(transport.lastEnvelope?.metadata.headers["correlation-id"] == "test-correlation-456")
     }
     
-    // MARK: - ActorTransport Protocol Conformance Tests
+    // MARK: - MessageTransport Protocol Conformance Tests
     
-    @Test("Transport conforms to ActorTransport protocol")
+    @Test("Transport conforms to MessageTransport protocol")
     func testTransportConformance() async throws {
         let transport = MockTransport()
         
-        // Test that MockTransport conforms to ActorTransport
-        let _: any ActorTransport = transport
+        // Test that MockTransport conforms to MessageTransport
+        let _: any MessageTransport = transport
         
         // Test that it's Sendable
         let _: any Sendable = transport
+        
+        // Test required properties
+        #expect(transport.isConnected == true)
+        #expect(transport.metadata.transportType == "mock")
         
         #expect(true) // If we get here, conformance is correct
     }
@@ -139,20 +171,27 @@ struct TransportTests {
     @Test("Transport call performance")
     func testTransportPerformance() async throws {
         let transport = MockTransport()
-        transport.mockResponse = Data("performance test".utf8)
+        let responseData = Data("performance test".utf8)
         
-        let context = ServiceContext.topLevel
+        transport.mockResponse = Envelope.response(
+            to: TestConfig.testActorID,
+            callID: TestConfig.testCallID,
+            manifest: SerializationManifest(serializerID: "json"),
+            payload: responseData
+        )
+        
         let iterations = 100
-        
         let startTime = CFAbsoluteTimeGetCurrent()
         
-        for _ in 0..<iterations {
-            _ = try await transport.remoteCall(
-                on: TestConfig.testActorID,
-                method: TestConfig.testMethod,
-                arguments: TestConfig.testData,
-                context: context
+        for i in 0..<iterations {
+            let envelope = Envelope.invocation(
+                to: TestConfig.testActorID,
+                target: TestConfig.testMethod,
+                callID: "call-\(i)",
+                manifest: SerializationManifest(serializerID: "json"),
+                payload: TestConfig.testData
             )
+            _ = try await transport.send(envelope)
         }
         
         let duration = CFAbsoluteTimeGetCurrent() - startTime
@@ -165,7 +204,7 @@ struct TransportTests {
     
     @Test("Error envelope serialization")
     func testErrorEnvelopeSerialization() async throws {
-        let error = TestError.customError("Test error message")
+        let error = TestError.simpleError
         let envelope = ErrorEnvelope(
             typeURL: "test.error.TestError",
             data: try JSONEncoder().encode(error)
@@ -182,86 +221,95 @@ struct TransportTests {
 
 // MARK: - Mock Transport Implementation
 
-final class MockTransport: ActorTransport, @unchecked Sendable {
-    var mockResponse = Data()
-    var mockStreamData: [Data] = []
+final class MockTransport: MessageTransport, @unchecked Sendable {
+    var mockResponse: Envelope?
     var shouldThrowError = false
-    
-    var lastActorID: ActorEdgeID?
-    var lastMethod: String?
-    var lastArguments: Data?
-    var lastContext: ServiceContext?
     var voidCallCount = 0
+    var lastEnvelope: Envelope?
+    private var connected = true
+    private var receiveQueue: [Envelope] = []
     
-    func remoteCall(
-        on actorID: ActorEdgeID,
-        method: String,
-        arguments: Data,
-        context: ServiceContext
-    ) async throws -> Data {
+    func send(_ envelope: Envelope) async throws -> Envelope? {
         if shouldThrowError {
-            throw ActorEdgeError.transportError("Mock transport error")
+            throw TransportError.sendFailed(reason: "Mock transport error")
         }
         
-        lastActorID = actorID
-        lastMethod = method
-        lastArguments = arguments
-        lastContext = context
+        if !connected {
+            throw TransportError.disconnected
+        }
         
-        return mockResponse
+        lastEnvelope = envelope
+        
+        // Count void calls
+        if envelope.messageType == .invocation && mockResponse == nil {
+            voidCallCount += 1
+            return nil
+        }
+        
+        // Return mock response if set
+        if var response = mockResponse {
+            // Update response to match request call ID
+            response = Envelope(
+                recipient: envelope.sender ?? envelope.recipient,
+                sender: envelope.recipient,
+                manifest: response.manifest,
+                payload: response.payload,
+                metadata: MessageMetadata(
+                    callID: envelope.metadata.callID,
+                    target: response.metadata.target,
+                    headers: response.metadata.headers
+                ),
+                messageType: response.messageType
+            )
+            return response
+        }
+        
+        return nil
     }
     
-    func remoteCallVoid(
-        on actorID: ActorEdgeID,
-        method: String,
-        arguments: Data,
-        context: ServiceContext
-    ) async throws {
-        if shouldThrowError {
-            throw ActorEdgeError.transportError("Mock transport error")
-        }
-        
-        lastActorID = actorID
-        lastMethod = method
-        lastArguments = arguments
-        lastContext = context
-        voidCallCount += 1
-    }
-    
-    func streamCall(
-        on actorID: ActorEdgeID,
-        method: String,
-        arguments: Data,
-        context: ServiceContext
-    ) async throws -> AsyncThrowingStream<Data, Error> {
-        if shouldThrowError {
-            throw ActorEdgeError.transportError("Mock transport error")
-        }
-        
-        lastActorID = actorID
-        lastMethod = method
-        lastArguments = arguments
-        lastContext = context
-        
-        return AsyncThrowingStream<Data, Error> { continuation in
-            Task {
-                for data in mockStreamData {
-                    continuation.yield(data)
-                    try await Task.sleep(nanoseconds: 1_000_000) // 1ms between chunks
-                }
+    func receive() -> AsyncStream<Envelope> {
+        AsyncStream { continuation in
+            for envelope in receiveQueue {
+                continuation.yield(envelope)
+            }
+            
+            // Keep stream open for future messages
+            if connected {
+                // In real implementation, this would wait for new messages
+                // For testing, we just finish after current queue
+                continuation.finish()
+            } else {
                 continuation.finish()
             }
         }
     }
+    
+    func close() async throws {
+        connected = false
+        receiveQueue.removeAll()
+    }
+    
+    var isConnected: Bool {
+        connected
+    }
+    
+    var metadata: TransportMetadata {
+        TransportMetadata(
+            transportType: "mock",
+            attributes: ["test": "true"],
+            endpoint: "mock://test",
+            isSecure: false
+        )
+    }
+    
+    // Test helpers
+    func enqueueReceiveEnvelope(_ envelope: Envelope) {
+        receiveQueue.append(envelope)
+    }
+    
+    func disconnect() {
+        connected = false
+    }
 }
 
-// MARK: - Test Types
-
-enum TestError: Error, Codable, Equatable {
-    case customError(String)
-}
-
-enum TestTraceIDKey: ServiceContextKey {
-    typealias Value = String
-    static var defaultValue: String { "" }
-}
+// Test types are imported from TestUtilities.swift
