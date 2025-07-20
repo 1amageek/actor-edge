@@ -22,7 +22,7 @@ swift package clean
 
 ## Architecture Overview
 
-ActorEdge is a lightweight gRPC-based distributed actor RPC framework that enables declarative server definitions using Swift's distributed actors. It leverages SE-0428's `@Resolvable` macro to provide type-safe client stubs without requiring clients to know server implementations.
+ActorEdge is a protocol-independent distributed actor framework that enables declarative server definitions using Swift's distributed actors. It leverages SE-0428's `@Resolvable` macro to provide type-safe client stubs without requiring clients to know server implementations. The framework follows Swift Distributed's design principles by abstracting the transport layer, allowing for gRPC, WebSocket, TCP, or any other protocol implementation.
 
 ### @Resolvable Macro (SE-0428)
 
@@ -44,9 +44,23 @@ let actor = try $Protocol.resolve(id: id, using: system)
 
 The `@Resolvable` macro generates a stub actor (`$ProtocolName`) that implements the protocol and forwards all calls through the actor system's `remoteCall` methods.
 
-Built on gRPC Swift 2.0, ActorEdge fully embraces Swift's modern async/await concurrency model, providing a natural and idiomatic API for distributed actor communication. The framework integrates seamlessly with Swift's structured concurrency while maintaining the distributed actor programming model.
+ActorEdge fully embraces Swift's modern async/await concurrency model, providing a natural and idiomatic API for distributed actor communication. The framework integrates seamlessly with Swift's structured concurrency while maintaining the distributed actor programming model through protocol-independent message envelopes.
 
-**Important**: This implementation requires macOS 15.0+ due to gRPC Swift 2.0 and Distributed Actor dependencies.
+**Important**: This implementation requires macOS 15.0+ due to Distributed Actor and modern Swift concurrency dependencies.
+
+### Design Philosophy: Swift Distributed Compliance
+
+ActorEdge follows the core design principles of Swift Distributed:
+
+1. **Protocol Independence**: The actor system should not be coupled to any specific transport protocol
+2. **Abstraction Layers**: Clear separation between distributed actor logic and network transport
+3. **Testability**: Easy to test without actual network connections
+4. **Extensibility**: New transports can be added without changing core logic
+
+This is achieved through the **Envelope Pattern** (inspired by swift-distributed-actors' Wire.Envelope):
+- `ActorEdgeEnvelope`: Protocol-agnostic message container
+- `MessageTransport`: Abstract transport interface
+- Transport implementations map between envelopes and their native formats
 
 ### Core Design Pattern
 
@@ -99,8 +113,8 @@ public distributed actor ChatServerActor: Chat {
 }
 
 // Client module - uses auto-generated $Chat stub
-let transport = try await GRPCActorTransport("127.0.0.1:8000")
-let system = ActorEdgeSystem(transport: transport)
+// Protocol-independent: can use gRPC, WebSocket, or any transport
+let system = try await ActorEdgeSystem.grpcClient(endpoint: "127.0.0.1:8000")
 let chat = try $Chat.resolve(id: ActorEdgeID(), using: system)
 try await chat.send("Hello")
 ```
@@ -151,32 +165,44 @@ The `main()` function is provided by a Server extension that reads these configu
 **ActorEdgeSystem**
 - `DistributedActorSystem` implementation for non-cluster environments
 - Manages actor lifecycle and remote call dispatch
-- Integrates with `ActorTransport` for network communication
+- Uses abstract `MessageTransport` for protocol independence
 - Server-side actor registry for method dispatch
+- Converts invocations to protocol-agnostic `ActorEdgeEnvelope`
 
-**GRPCActorTransport** 
-- Client-side `ActorTransport` implementation using gRPC Swift 2.0
-- Uses modern `GRPCClient` with async/await APIs
-- Manages single HTTP/2 connection per endpoint
-- Handles protobuf message serialization
+**ActorEdgeEnvelope**
+- Protocol-independent message container
+- Contains recipient ID, serialization manifest, and payload
+- Enables transport layer abstraction
+- Inspired by swift-distributed-actors' Wire.Envelope pattern
+
+**MessageTransport Protocol**
+- Abstract interface for any transport implementation
+- Supports gRPC, WebSocket, TCP, UDP, or custom protocols
+- Handles envelope sending/receiving
+- Enables testability with in-memory implementations
+
+**Transport Implementations**
+- `GRPCMessageTransport`: gRPC Swift 2.0 implementation
+- `WebSocketMessageTransport`: WebSocket support (future)
+- `InMemoryMessageTransport`: Testing and local development
 
 **Server Protocol Extension**
 - Provides `static func main()` implementation
-- Creates `GRPCServer` with async/await support
+- Transport-agnostic server creation
 - Uses `ServiceLifecycle.ServiceGroup` for lifecycle management
 - Configures server from declarative protocol properties
 
 **DistributedActorService**
-- Custom `RegistrableRPCService` implementation
-- Registers RPC handlers without protobuf code generation
+- Transport-specific service implementations
+- Converts between envelopes and transport messages
 - Handles method dispatch to distributed actors
-- Supports both unary and streaming RPCs
+- Supports both unary and streaming calls
 
 **InvocationEncoder/Decoder**
 - Binary serialization format for method arguments
 - Supports generic type substitutions
 - Compatible with swift-distributed-actors wire format
-- Wrapped in protobuf messages for transport
+- Transport-agnostic payload generation
 
 ### Package Structure
 
@@ -188,11 +214,15 @@ Sources/
 │   ├── ActorEdgeID.swift
 │   ├── ActorEdgeSystem.swift
 │   ├── ActorRegistry.swift
-│   ├── GRPCActorTransport.swift
+│   ├── ActorEdgeEnvelope.swift  # Protocol-independent message
 │   ├── Protocols/
-│   │   ├── ActorTransport.swift
+│   │   ├── MessageTransport.swift  # Abstract transport layer
 │   │   ├── Server.swift    # Server protocol with config
 │   │   └── ServerMiddleware.swift
+│   ├── Transports/         # Transport implementations
+│   │   ├── GRPCMessageTransport.swift
+│   │   ├── WebSocketMessageTransport.swift
+│   │   └── InMemoryMessageTransport.swift
 │   ├── Configuration/
 │   │   ├── MetricsConfiguration.swift
 │   │   ├── TLSConfiguration.swift
@@ -217,83 +247,112 @@ Sources/
     └── Connect.swift
 ```
 
-### gRPC Swift 2.0 Integration
+### Protocol-Independent Design
 
-ActorEdge leverages gRPC Swift 2.0's modern architecture:
+ActorEdge abstracts the transport layer using the Envelope pattern:
 
-**Client Implementation**
+**ActorEdgeEnvelope**
 ```swift
-public final class GRPCActorTransport: ActorTransport {
-    private let client: GRPCClient
+public struct ActorEdgeEnvelope: Sendable, Codable {
+    public let recipient: ActorEdgeID
+    public let manifest: SerializationManifest
+    public let payload: Data
+    public let metadata: [String: String]
+}
+
+public struct SerializationManifest: Sendable, Codable {
+    public let serializerID: String
+    public let typeHint: String?
+    public let version: String?
+}
+```
+
+**MessageTransport Protocol**
+```swift
+public protocol MessageTransport: Sendable {
+    func send(_ envelope: ActorEdgeEnvelope) async throws
+    func receive() -> AsyncStream<ActorEdgeEnvelope>
+    func close() async throws
+}
+```
+
+**ActorEdgeSystem Integration**
+```swift
+public final class ActorEdgeSystem: DistributedActorSystem {
+    private let transport: MessageTransport  // Protocol, not concrete type
     
-    public init(_ endpoint: String, tls: ClientTLSConfiguration? = nil) async throws {
-        self.client = GRPCClient(
-            transport: try .http2NIOPosix(
-                target: .host(endpoint),
-                transportSecurity: tls != nil ? .tls : .plaintext
-            )
+    public func remoteCall<Act, Err, Res>(...) async throws -> Res {
+        // Convert invocation to envelope
+        let envelope = try createEnvelope(
+            recipient: actor.id,
+            invocation: invocation,
+            target: target
         )
-    }
-    
-    public func remoteCall(...) async throws -> Data {
-        let response = try await client.unary(
-            request: ClientRequest(message: protoRequest),
-            descriptor: MethodDescriptor(
-                service: "actoredge.DistributedActor",
-                method: "RemoteCall"
-            ),
-            serializer: ProtobufSerializer<Actoredge_RemoteCallRequest>(),
-            deserializer: ProtobufDeserializer<Actoredge_RemoteCallResponse>()
-        )
-        // Handle response
+        
+        // Send through abstract transport
+        try await transport.send(envelope)
+        
+        // Handle response...
     }
 }
 ```
 
-**Server Implementation**
+**Factory Methods for Different Transports**
 ```swift
-final class DistributedActorService: RegistrableRPCService {
-    func registerMethods(with router: inout RPCRouter) {
-        router.registerHandler(
-            forMethod: MethodDescriptor(
-                service: "actoredge.DistributedActor",
-                method: "RemoteCall"
-            ),
-            deserializer: ProtobufDeserializer<Actoredge_RemoteCallRequest>(),
-            serializer: ProtobufSerializer<Actoredge_RemoteCallResponse>()
-        ) { (request: ServerRequest<Actoredge_RemoteCallRequest>, context: ServerContext) in
-            // Decode invocation and dispatch to actor
-            let result = try await self.system.executeDistributedTarget(...)
-            return ServerResponse(message: .with { $0.value = result })
-        }
-    }
-}
+// gRPC transport
+let system = try await ActorEdgeSystem.grpcClient(endpoint: "server:8000")
+
+// WebSocket transport (future)
+let system = try await ActorEdgeSystem.webSocketClient(url: wsURL)
+
+// Custom transport
+let transport = MyCustomTransport()
+let system = ActorEdgeSystem.client(transport: transport)
 ```
 
 ### Wire Protocol
 
-gRPC service definition:
+ActorEdge uses a transport-agnostic envelope format. Each transport implementation maps between envelopes and its native format:
+
+**gRPC Transport Mapping**
 ```proto
+// gRPC-specific message format
 service DistributedActor {
   rpc RemoteCall(RemoteCallRequest) returns (RemoteCallResponse);
   rpc StreamCall(stream RemoteStreamPacket) returns (stream RemoteStreamPacket);
 }
 
 message RemoteCallRequest {
-  string actor_id = 1;   // 96-bit UUID, base64url
-  string method   = 2;   // mangled func signature
-  bytes  payload  = 3;   // arguments via InvocationEncoder
+  string actor_id = 1;   // Maps to envelope.recipient
+  string method   = 2;   // Maps to envelope.metadata["target"]
+  bytes  payload  = 3;   // Maps to envelope.payload
+}
+```
+
+**WebSocket Transport Mapping**
+```swift
+// WebSocket sends JSON-encoded envelopes
+{
+  "recipient": "base64-actor-id",
+  "manifest": {
+    "serializerID": "json",
+    "version": "1.0"
+  },
+  "payload": "base64-encoded-data",
+  "metadata": {
+    "target": "method-identifier"
+  }
 }
 ```
 
 ### Implementation Status
 
-✅ **Completed**:
+✅ **Completed (Current Implementation)**:
 1. **Package.swift**: Added all dependencies including gRPC Swift 2.0
-2. **Core Types**: Implemented `ActorEdgeSystem`, `ActorTransport` protocol
-3. **Serialization**: Created `ActorEdgeInvocationEncoder/Decoder` with JSON format
-4. **Server Protocol**: Implemented `Server` protocol with `@ActorBuilder` and `main()` extension
-5. **Transport**: `GRPCActorTransport` implementation with async/await
+2. **Core Types**: Basic `ActorEdgeSystem` and `ActorTransport` protocol
+3. **Serialization**: `ActorEdgeInvocationEncoder/Decoder` with JSON format
+4. **Server Protocol**: `Server` protocol with `@ActorBuilder` and `main()` extension
+5. **gRPC Transport**: Direct `GRPCActorTransport` implementation (needs refactoring)
 6. **Service**: `DistributedActorService` as RegistrableRPCService
 7. **Protobuf**: SwiftProtobufPlugin for automatic code generation
 8. **Error Handling**: Basic `ErrorEnvelope` implementation
@@ -304,33 +363,44 @@ message RemoteCallRequest {
 13. **Testing Strategy**: Comprehensive testing framework and guidelines
 14. **TLS Support**: Production-ready TLS configuration with certificate abstraction
 
-⏳ **Pending**:
-1. **Binary Serialization**: Switch from JSON to binary format for performance
-2. **ServiceLifecycle**: Enhanced integration with ServiceGroup
-3. **Test Implementation**: Unit, integration, and performance tests
-4. **Middleware System**: Request/response middleware pipeline
-5. **Full gRPC TLS Integration**: Waiting for grpc-swift 2.0 to expose complete TLS API
+🔄 **Architecture Refactoring Required**:
+1. **ActorEdgeEnvelope**: Implement protocol-independent message container
+2. **MessageTransport Protocol**: Create abstract transport interface
+3. **GRPCMessageTransport**: Refactor current GRPCActorTransport to implement MessageTransport
+4. **InMemoryMessageTransport**: Add for testing without network
+5. **ActorEdgeSystem Update**: Use MessageTransport instead of direct gRPC dependency
+6. **Factory Methods**: Add transport-agnostic client creation methods
+
+⏳ **Future Enhancements**:
+1. **WebSocket Transport**: WebSocket implementation for browser compatibility
+2. **Binary Serialization**: Switch from JSON to binary format for performance
+3. **ServiceLifecycle**: Enhanced integration with ServiceGroup
+4. **Test Implementation**: Unit, integration, and performance tests
+5. **Middleware System**: Request/response middleware pipeline
+6. **Transport Selection**: Runtime transport negotiation and fallback
 
 ### Key Implementation Notes
 
-- **gRPC Swift 2.0**: Uses modern async/await APIs throughout, no EventLoopFutures
-- **Custom Service**: Implements `RegistrableRPCService` without protobuf service generation
-- **Message Format**: ActorEdge invocation format wrapped in protobuf for transport
+- **Protocol Independence**: Transport layer abstracted through `MessageTransport` protocol
+- **Envelope Pattern**: All messages wrapped in `ActorEdgeEnvelope` for transport agnosticism
+- **Swift Distributed Compliance**: Follows design principles from swift-distributed-actors
+- **Multiple Transports**: Support for gRPC, WebSocket, TCP, UDP, or custom protocols
 - **@Resolvable Usage**: Protocols must inherit from `DistributedActor`, contain only `distributed func` methods, no associated types, and all parameter/return types must be `Codable & Sendable`
-- **Single Connection**: Each `GRPCClient` maintains one HTTP/2 connection per endpoint
+- **Connection Management**: Transport-specific (e.g., HTTP/2 for gRPC, persistent for WebSocket)
 - **Error Propagation**: Remote errors are wrapped in `ErrorEnvelope` and re-thrown on client
-- **Context Propagation**: Trace/Baggage context propagated via gRPC metadata
-- **Binary Size**: Keep iOS delta < 1.4MB by careful dependency management
+- **Context Propagation**: Metadata in envelope carries trace/baggage context
+- **Binary Size**: Keep iOS delta < 1.4MB by modular transport loading
 - **ServiceLifecycle**: Server uses `ServiceGroup` for proper lifecycle management
 - **ActorBuilder**: SwiftUI-style `@ActorBuilder` for declarative actor configuration
-- **SwiftProtobufPlugin**: Automatic protobuf code generation during build
+- **Testability**: In-memory transport for unit testing without network
 
 ### Design Constraints
 
 - No clustering or service discovery (unlike swift-distributed-actors)
-- TLS 1.2+ recommended for production use
+- Transport security depends on implementation (TLS for gRPC/TCP, WSS for WebSocket)
 - Client and server must share identical API module version
 - All distributed methods must be async throws
+- Envelope format must remain stable across versions
 
 ## TLS Configuration
 
@@ -382,7 +452,8 @@ let mtlsConfig = TLSConfiguration.serverMTLS(
 
 ```swift
 // System default CA certificates
-let transport = try await GRPCActorTransport("server:443", 
+let system = try await ActorEdgeSystem.grpcClient(
+    endpoint: "server:443",
     tls: .systemDefault()
 )
 
@@ -759,6 +830,107 @@ private func invokeMethodUsingSwiftRuntime<Act: DistributedActor>(
 
 この設計により、swift-distributed-actorsと同等の完璧な実装が実現されます。
 
+## 設計原則の違反を避ける
+
+### 間違った設計（現在の実装の問題）
+
+```swift
+// ❌ 悪い例: 通信プロトコルに直接依存
+public final class GRPCActorTransport: ActorTransport {
+    private let client: GRPCClient  // gRPCに密結合
+    
+    public func remoteCall(...) async throws -> Data {
+        // gRPC固有の実装が露出
+    }
+}
+```
+
+**問題点**:
+1. ActorSystemがgRPC実装の詳細を知っている
+2. 他のプロトコルへの切り替えが困難
+3. テストでも実際のgRPCが必要
+4. Swift Distributedの設計原則に違反
+
+### 正しい設計（Envelopeパターン）
+
+```swift
+// ✅ 良い例: 抽象化されたメッセージング
+public protocol MessageTransport {
+    func send(_ envelope: ActorEdgeEnvelope) async throws
+}
+
+public final class ActorEdgeSystem {
+    private let transport: MessageTransport  // 抽象プロトコル
+    
+    // gRPC、WebSocket、TCPなど任意の実装を注入可能
+}
+```
+
+**利点**:
+1. プロトコル独立性の実現
+2. テスト時はInMemoryTransportを使用
+3. 実行時にプロトコルを選択可能
+4. Swift Distributedの設計思想に準拠
+
+## 移行ガイド: 現在の実装から新アーキテクチャへ
+
+### 1. MessageTransportプロトコルの実装
+
+```swift
+// Sources/ActorEdgeCore/Protocols/MessageTransport.swift
+public protocol MessageTransport: Sendable {
+    func send(_ envelope: ActorEdgeEnvelope) async throws
+    func receive() -> AsyncStream<ActorEdgeEnvelope>
+    func close() async throws
+}
+```
+
+### 2. ActorEdgeEnvelopeの追加
+
+```swift
+// Sources/ActorEdgeCore/ActorEdgeEnvelope.swift
+public struct ActorEdgeEnvelope: Sendable, Codable {
+    public let recipient: ActorEdgeID
+    public let manifest: SerializationManifest
+    public let payload: Data
+    public let metadata: [String: String]
+}
+```
+
+### 3. GRPCActorTransportのリファクタリング
+
+```swift
+// 現在: Sources/ActorEdgeCore/GRPCActorTransport.swift
+// 移動先: Sources/ActorEdgeCore/Transports/GRPCMessageTransport.swift
+public final class GRPCMessageTransport: MessageTransport {
+    // 既存のgRPC実装をMessageTransportインターフェースでラップ
+}
+```
+
+### 4. ActorEdgeSystemの更新
+
+```swift
+// ActorTransport依存からMessageTransport依存へ
+public final class ActorEdgeSystem {
+    private let transport: MessageTransport  // 変更点
+    
+    public init(transport: MessageTransport) {  // 変更点
+        self.transport = transport
+    }
+}
+```
+
+### 5. クライアントコードの更新
+
+```swift
+// Before
+let transport = try await GRPCActorTransport("server:8000")
+let system = ActorEdgeSystem(transport: transport)
+
+// After
+let system = try await ActorEdgeSystem.grpcClient(endpoint: "server:8000")
+```
+
 ## Distributed Framework動作フロー
 
 ### 分散アクターのライフサイクル
@@ -945,11 +1117,11 @@ struct MyServer: Server {
 
 ```swift
 // クライアントは実装型を知らない
-let transport = try await GRPCActorTransport(
-    "server.example.com:9000",
+// Protocol-independent client creation
+let system = try await ActorEdgeSystem.grpcClient(
+    endpoint: "server.example.com:9000",
     tls: .systemDefault()
 )
-let system = ActorEdgeSystem(transport: transport)
 
 // プロトコル型で解決（@Resolvableの恩恵）
 let userService = try $UserService.resolve(

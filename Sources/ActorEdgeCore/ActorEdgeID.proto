@@ -1,0 +1,14 @@
+//===----------------------------------------------------------------------===//
+// ActorEdge ID definition - simplified version without cluster concepts
+//===----------------------------------------------------------------------===//
+
+syntax = "proto3";
+
+option optimize_for = SPEED;
+option swift_prefix = "ActorEdge";
+
+// Simplified actor ID for edge computing (no cluster/node concepts)
+message ActorID {
+    string value = 1;  // Simple string-based ID like "chat-server"
+    map<string, string> metadata = 2;  // Optional metadata
+}

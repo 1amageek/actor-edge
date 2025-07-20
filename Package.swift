@@ -69,7 +69,9 @@ let package = Package(
                 .product(name: "ServiceContextModule", package: "swift-service-context"),
                 .product(name: "Metrics", package: "swift-metrics"),
             ],
-            exclude: [],
+            resources: [
+                .process("swift-protobuf-config.json")
+            ],
             plugins: [
                 .plugin(name: "SwiftProtobufPlugin", package: "swift-protobuf")
             ]

@@ -48,17 +48,20 @@ public struct MetricNames: Sendable {
         self.namespace = namespace
     }
     
-    // CallLifecycleManager metrics
-    public var inflightCalls: String { "\(namespace)_inflight_calls" }
-    public var callsTimedOutTotal: String { "\(namespace)_calls_timed_out_total" }
-    public var callLatencySeconds: String { "\(namespace)_call_latency_seconds" }
-    public var drainDurationSeconds: String { "\(namespace)_drain_duration_seconds" }
-    
-    // GRPCActorTransport metrics
-    public var grpcRequestsTotal: String { "\(namespace)_grpc_requests_total" }
-    public var grpcErrorsTotal: String { "\(namespace)_grpc_errors_total" }
+    // MessageTransport metrics
+    public var messagesEnvelopesSentTotal: String { "\(namespace)_messages_envelopes_sent_total" }
+    public var messagesEnvelopesReceivedTotal: String { "\(namespace)_messages_envelopes_received_total" }
+    public var messagesEnvelopesErrorsTotal: String { "\(namespace)_messages_envelopes_errors_total" }
+    public var messageTransportLatencySeconds: String { "\(namespace)_message_transport_latency_seconds" }
     
     // ActorEdgeSystem metrics
     public var distributedCallsTotal: String { "\(namespace)_distributed_calls_total" }
     public var methodInvocationsTotal: String { "\(namespace)_method_invocations_total" }
+    public var actorRegistrationsTotal: String { "\(namespace)_actor_registrations_total" }
+    public var actorResolutionsTotal: String { "\(namespace)_actor_resolutions_total" }
+    
+    // Serialization metrics
+    public var serializationTotal: String { "\(namespace)_serialization_total" }
+    public var deserializationTotal: String { "\(namespace)_deserialization_total" }
+    public var serializationErrorsTotal: String { "\(namespace)_serialization_errors_total" }
 }

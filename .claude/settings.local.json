@@ -29,7 +29,14 @@
       "WebFetch(domain:zenn.dev)",
       "Bash(grep:*)",
       "Bash(find:*)",
-      "Bash(swift run:*)"
+      "Bash(swift run:*)",
+      "Bash(LOG_LEVEL=debug swift run SampleChat)",
+      "Bash(gtimeout:*)",
+      "Bash(kill:*)",
+      "Bash(md5sum:*)",
+      "WebFetch(domain:swiftinit.org)",
+      "Bash(.build/debug/SampleChat)",
+      "Bash(timeout 5 swift run SampleChat)"
     ],
     "deny": []
   }

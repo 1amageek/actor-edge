@@ -71,15 +71,19 @@ public enum TrustRootsSource: Sendable {
     case systemDefault
     /// Use custom certificates as trust roots
     case certificates([CertificateSource])
+    /// No trust roots (insecure)
+    case none
     
     /// Convert to NIOSSL trust roots
-    public func makeNIOSSLTrustRoots() throws -> NIOSSLTrustRoots {
+    public func makeNIOSSLTrustRoots() throws -> NIOSSLTrustRoots? {
         switch self {
         case .systemDefault:
             return .default
         case .certificates(let sources):
             let certs = try sources.map { try $0.load() }
             return .certificates(certs)
+        case .none:
+            return nil
         }
     }
 }

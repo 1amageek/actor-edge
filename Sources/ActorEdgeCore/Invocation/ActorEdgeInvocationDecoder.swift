@@ -1,49 +1,62 @@
+//===----------------------------------------------------------------------===//
+//
+// This source file is part of the ActorEdge open source project
+//
+// Copyright (c) 2024 ActorEdge contributors
+// Licensed under Apache License v2.0 with Runtime Library Exception
+//
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+//
+//===----------------------------------------------------------------------===//
+
 import Distributed
 import Foundation
 
-/// Decoder for distributed actor method invocations
-/// Based on swift-distributed-actors ClusterInvocationDecoder patterns
+/// Decoder for distributed actor method invocations.
+///
+/// This decoder implements Swift Distributed's `DistributedTargetInvocationDecoder`
+/// protocol to reconstruct method invocations from serialized data received
+/// over the network.
 public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
     public typealias SerializationRequirement = Codable & Sendable
     
-    // MARK: - Internal State (following swift-distributed-actors pattern)
+    // MARK: - Internal State
     
     /// Current decoding state
-    private let state: InvocationDecoderState
+    private let state: DecodingState
     
-    /// Reference to the actor system for actor resolution
+    /// Reference to the actor system
     private let system: ActorEdgeSystem
     
     /// Current argument index for sequential decoding
     private var argumentIndex: Int = 0
     
-    /// Serialization system for decoding arguments
-    private var serialization: Serialization {
-        system.serialization
-    }
+    /// The original envelope (for context)
+    private let envelope: Envelope?
     
     // MARK: - Initialization
     
-    /// Initialize from a remote call message
-    public init(system: ActorEdgeSystem, message: InvocationMessage) {
+    /// Initialize from invocation data and envelope.
+    /// Used by DistributedInvocationProcessor.
+    internal init(
+        system: ActorEdgeSystem,
+        invocationData: InvocationData,
+        envelope: Envelope? = nil
+    ) {
         self.system = system
-        self.state = .remoteCall(message)
+        self.state = .remoteCall(invocationData)
+        self.envelope = envelope
     }
     
-    /// Initialize from a local call encoder (for proxy optimization)
-    public init(system: ActorEdgeSystem, encoder: ActorEdgeInvocationEncoder) {
+    /// Initialize from a local encoder (for optimization).
+    internal init(
+        system: ActorEdgeSystem,
+        encoder: ActorEdgeInvocationEncoder
+    ) {
         self.system = system
         self.state = .localCall(encoder)
-    }
-    
-    /// Initialize from serialized payload
-    public init(system: ActorEdgeSystem, payload: Data) throws {
-        self.system = system
-        
-        // Decode as InvocationMessage
-        let buffer = Serialization.Buffer.data(payload)
-        let message = try system.serialization.deserialize(buffer, as: InvocationMessage.self, system: system)
-        self.state = .remoteCall(message)
+        self.envelope = nil
     }
     
     // MARK: - DistributedTargetInvocationDecoder Implementation
@@ -53,26 +66,27 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
         let substitutions: [String]
         
         switch state {
-        case .remoteCall(let message):
-            substitutions = message.genericSubstitutions
+        case .remoteCall(let data):
+            substitutions = data.genericSubstitutions
         case .localCall(let encoder):
-            substitutions = encoder.genericSubstitutions
+            // Get from finalized invocation data
+            let invocationData = try encoder.finalizeInvocation()
+            substitutions = invocationData.genericSubstitutions
         }
         
         // Optimized for concrete types (most common case)
         if substitutions.isEmpty {
-            return [] // Most distributed actor calls use concrete types
+            return []
         }
         
-        // Handle generic type resolution with graceful fallback
+        // Handle generic type resolution
         var types: [Any.Type] = []
-        for typeName in substitutions {
-            // Try to resolve type using _typeByName (will be improved later)
-            if let type = ActorEdge._typeByName(typeName) {
+        for mangledName in substitutions {
+            if let type = _typeByName(mangledName) {
                 types.append(type)
             } else {
-                // Log warning and use Any.self as fallback instead of throwing
-                print("Warning: Cannot resolve generic type '\(typeName)', using Any.self")
+                // Log warning and use Any.self as fallback
+                system.log("Cannot resolve generic type '\(mangledName)', using Any.self")
                 types.append(Any.self)
             }
         }
@@ -83,148 +97,130 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
     public mutating func decodeNextArgument<Argument>() throws -> Argument 
     where Argument: SerializationRequirement {
         let argumentData: Data
-        let manifest: Serialization.Manifest?
+        let manifest: SerializationManifest
         
         switch state {
-        case .remoteCall(let message):
-            guard argumentIndex < message.arguments.count else {
-                throw ActorEdgeError.deserializationFailed(
-                    "Not enough arguments: expected \(argumentIndex + 1), have \(message.arguments.count)"
+        case .remoteCall(let data):
+            guard argumentIndex < data.arguments.count else {
+                throw DecodingError.notEnoughArguments(
+                    expected: argumentIndex + 1,
+                    actual: data.arguments.count
                 )
             }
-            argumentData = message.arguments[argumentIndex]
-            manifest = argumentIndex < message.argumentManifests.count ? message.argumentManifests[argumentIndex] : nil
+            argumentData = data.arguments[argumentIndex]
+            if argumentIndex < data.argumentManifests.count {
+                manifest = data.argumentManifests[argumentIndex]
+            } else {
+                manifest = SerializationManifest.json()
+            }
             
         case .localCall(let encoder):
-            guard argumentIndex < encoder.arguments.count else {
-                throw ActorEdgeError.deserializationFailed(
-                    "Not enough arguments: expected \(argumentIndex + 1), have \(encoder.arguments.count)"
+            let invocationData = try encoder.finalizeInvocation()
+            guard argumentIndex < invocationData.arguments.count else {
+                throw DecodingError.notEnoughArguments(
+                    expected: argumentIndex + 1,
+                    actual: invocationData.arguments.count
                 )
             }
-            argumentData = encoder.arguments[argumentIndex]
-            manifest = argumentIndex < encoder.manifests.count ? encoder.manifests[argumentIndex] : nil
+            argumentData = invocationData.arguments[argumentIndex]
+            if argumentIndex < invocationData.argumentManifests.count {
+                manifest = invocationData.argumentManifests[argumentIndex]
+            } else {
+                manifest = SerializationManifest.json()
+            }
         }
         
-        let currentIndex = argumentIndex
         argumentIndex += 1
         
-        // Decode the argument using Serialization with manifest if available
-        let buffer = Serialization.Buffer.data(argumentData)
+        // Deserialize using the new SerializationSystem
+        let decoder = JSONDecoder()
+        decoder.userInfo[.actorSystemKey] = system
         
-        if let manifest = manifest {
-            // Use manifest-based deserialization
-            let value = try serialization.deserialize(buffer: buffer, using: manifest, system: system)
-            
-            // Check if we got the expected type directly
-            if let typedValue = value as? Argument {
-                return typedValue
+        // Special handling for distributed actors
+        if Argument.self is any DistributedActor.Type {
+            // For now, we'll deserialize the actor ID and resolve it
+            // This is a simplified implementation
+            if let actorIDString = String(data: argumentData, encoding: .utf8) {
+                let _ = ActorEdgeID(actorIDString)
+                // Try to resolve the actor locally
+                // Note: This is a simplified version - the actual implementation
+                // would need proper type checking and casting
+                throw DecodingError.typeMismatch(
+                    expected: String(describing: Argument.self),
+                    actual: "Distributed actor deserialization not fully implemented"
+                )
             }
-            
-            // If we got Data (from unknown type deserialization), decode it to the expected type
-            if let data = value as? Data {
-                let decoder = JSONDecoder()
-                decoder.dateDecodingStrategy = .iso8601
-                decoder.dataDecodingStrategy = .base64
-                decoder.userInfo[.actorSystemKey] = system
-                return try decoder.decode(Argument.self, from: data)
-            }
-            
-            throw ActorEdgeError.deserializationFailed(
-                "Argument \(currentIndex) is not of expected type \(Argument.self), got \(type(of: value))"
+            throw DecodingError.typeMismatch(
+                expected: String(describing: Argument.self),
+                actual: "Could not decode distributed actor reference"
             )
-        } else {
-            // Fallback to type-based deserialization
-            return try serialization.deserialize(buffer, as: Argument.self, system: system)
         }
+        
+        // Regular deserialization
+        return try system.serialization.deserialize(
+            argumentData,
+            as: Argument.self,
+            using: manifest
+        )
     }
     
     public mutating func decodeReturnType() throws -> Any.Type? {
-        // Return type decoding is not implemented in swift-distributed-actors either
-        // This method exists for protocol conformance but returns nil
+        // Return type information is not stored in the simplified design
+        // The runtime already knows the return type from the method signature
         return nil
     }
     
     public mutating func decodeErrorType() throws -> Any.Type? {
-        // Error type decoding is not implemented in swift-distributed-actors either  
-        // This method exists for protocol conformance but returns nil
+        // Error type information is not stored in the simplified design
+        // The runtime already knows the error type from the method signature
         return nil
     }
     
-    /// Decode the next argument with a specific type (type-erased)
-    public mutating func decodeNextArgument(as type: Any.Type) throws -> Any {
-        let argumentData: Data
-        let manifest: Serialization.Manifest?
-        
-        switch state {
-        case .remoteCall(let message):
-            guard argumentIndex < message.arguments.count else {
-                throw ActorEdgeError.deserializationFailed(
-                    "Not enough arguments: expected \(argumentIndex + 1), have \(message.arguments.count)"
-                )
-            }
-            argumentData = message.arguments[argumentIndex]
-            manifest = argumentIndex < message.argumentManifests.count ? message.argumentManifests[argumentIndex] : nil
-            
-        case .localCall(let encoder):
-            guard argumentIndex < encoder.arguments.count else {
-                throw ActorEdgeError.deserializationFailed(
-                    "Not enough arguments: expected \(argumentIndex + 1), have \(encoder.arguments.count)"
-                )
-            }
-            argumentData = encoder.arguments[argumentIndex]
-            manifest = argumentIndex < encoder.manifests.count ? encoder.manifests[argumentIndex] : nil
-        }
-        
-        argumentIndex += 1
-        
-        // Decode using manifest if available
-        let buffer = Serialization.Buffer.data(argumentData)
-        
-        if let manifest = manifest {
-            // Use manifest-based deserialization
-            return try serialization.deserialize(buffer: buffer, using: manifest, system: system)
-        } else {
-            // Fallback to type-erased deserialization
-            guard let codableType = type as? any (Codable & Sendable).Type else {
-                throw ActorEdgeError.deserializationFailed(
-                    "Type \(type) does not conform to Codable & Sendable"
-                )
-            }
-            
-            return try serialization.deserializeErased(codableType, from: buffer, userInfo: [:], system: system)
-        }
-    }
-    
-    // MARK: - Internal Access Methods
-    
-    /// Get the target identifier from the invocation
-    internal var targetIdentifier: String {
-        switch state {
-        case .remoteCall(let message):
-            return message.targetIdentifier
-        case .localCall(_):
-            return "local-call"
-        }
-    }
-    
-    /// Get the call ID from the invocation (if available)
-    internal var callID: String? {
-        switch state {
-        case .remoteCall(let message):
-            return message.callID
-        case .localCall(_):
-            return nil
-        }
-    }
-    
-    /// Get the argument manifests from the invocation (if available)
-    internal var argumentManifests: [Serialization.Manifest]? {
-        switch state {
-        case .remoteCall(let message):
-            return message.argumentManifests
-        case .localCall(let encoder):
-            return encoder.manifests
-        }
+}
+
+// MARK: - Supporting Types
+
+/// Decoding state
+private enum DecodingState {
+    case remoteCall(InvocationData)
+    case localCall(ActorEdgeInvocationEncoder)
+}
+
+/// Decoding-specific errors
+private enum DecodingError: Error {
+    case notEnoughArguments(expected: Int, actual: Int)
+    case typeMismatch(expected: String, actual: String)
+}
+
+// MARK: - Type Resolution
+
+/// Attempts to resolve a type from its mangled name.
+/// This is a simplified version - production would use swift-demangle.
+private func _typeByName(_ mangledName: String) -> Any.Type? {
+    // Try common built-in types first
+    switch mangledName {
+    case "Swift.String", "String":
+        return String.self
+    case "Swift.Int", "Int":
+        return Int.self
+    case "Swift.Double", "Double":
+        return Double.self
+    case "Swift.Bool", "Bool":
+        return Bool.self
+    case "Swift.Array<Swift.String>":
+        return [String].self
+    case "Swift.Dictionary<Swift.String, Swift.String>":
+        return [String: String].self
+    default:
+        // For now, return nil for unknown types
+        // In production, this would use swift-demangle or a type registry
+        return nil
     }
 }
 
+// MARK: - CodingUserInfoKey Extension
+
+extension CodingUserInfoKey {
+    /// Key for storing the actor system in decoder's userInfo
+    static let actorSystemKey = CodingUserInfoKey(rawValue: "org.swift.actoredge.system")!
+}

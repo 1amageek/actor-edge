@@ -1,0 +1,19 @@
+//===----------------------------------------------------------------------===//
+// ActorEdge transport protocol for gRPC
+//===----------------------------------------------------------------------===//
+
+syntax = "proto3";
+
+option optimize_for = SPEED;
+option swift_prefix = "ActorEdge";
+
+import "Envelope.proto";
+
+// gRPC service definition for ActorEdge
+service ActorEdgeTransport {
+    // Unary call for request-response
+    rpc Call(Envelope) returns (Envelope);
+    
+    // Bidirectional streaming for advanced use cases
+    rpc Stream(stream Envelope) returns (stream Envelope);
+}

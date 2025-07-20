@@ -119,3 +119,71 @@ public struct TLSConfiguration: Sendable {
         return tlsConfig
     }
 }
+
+/// TLS configuration for client connections
+public struct ClientTLSConfiguration: Sendable {
+    /// Trust roots for server certificate verification
+    public let trustRoots: TrustRootsSource
+    /// Certificate chain sources (for mTLS)
+    public let certificateChainSources: [CertificateSource]?
+    /// Private key source (for mTLS)
+    public let privateKeySource: PrivateKeySource?
+    /// Cipher suites to use
+    public let cipherSuites: [NIOTLSCipher]?
+    /// Minimum TLS version
+    public let minimumTLSVersion: TLSVersion
+    /// Maximum TLS version
+    public let maximumTLSVersion: TLSVersion
+    /// Server hostname for verification
+    public let serverHostname: String?
+    
+    public init(
+        trustRoots: TrustRootsSource = .systemDefault,
+        certificateChainSources: [CertificateSource]? = nil,
+        privateKeySource: PrivateKeySource? = nil,
+        cipherSuites: [NIOTLSCipher]? = nil,
+        minimumTLSVersion: TLSVersion = .tlsv12,
+        maximumTLSVersion: TLSVersion = .tlsv13,
+        serverHostname: String? = nil
+    ) {
+        self.trustRoots = trustRoots
+        self.certificateChainSources = certificateChainSources
+        self.privateKeySource = privateKeySource
+        self.cipherSuites = cipherSuites
+        self.minimumTLSVersion = minimumTLSVersion
+        self.maximumTLSVersion = maximumTLSVersion
+        self.serverHostname = serverHostname
+    }
+    
+    // MARK: - Factory Methods
+    
+    /// System default TLS configuration
+    public static func systemDefault() -> ClientTLSConfiguration {
+        return ClientTLSConfiguration()
+    }
+    
+    /// Client configuration with custom CA
+    public static func client(
+        trustRoots: TrustRootsSource
+    ) -> ClientTLSConfiguration {
+        return ClientTLSConfiguration(trustRoots: trustRoots)
+    }
+    
+    /// Mutual TLS configuration
+    public static func mutualTLS(
+        certificateChain: [CertificateSource],
+        privateKey: PrivateKeySource,
+        trustRoots: TrustRootsSource = .systemDefault
+    ) -> ClientTLSConfiguration {
+        return ClientTLSConfiguration(
+            trustRoots: trustRoots,
+            certificateChainSources: certificateChain,
+            privateKeySource: privateKey
+        )
+    }
+    
+    /// Insecure configuration (development only)
+    public static func insecure() -> ClientTLSConfiguration {
+        return ClientTLSConfiguration(trustRoots: .none)
+    }
+}

@@ -1,10 +1,16 @@
 {
-  "protocPath": "/opt/homebrew/bin/protoc",
-  "invocations": [
-    {
-      "protoFiles": ["distributed_actor.proto"],
-      "visibility": "Public",
-      "fileNaming": "FullPath"
-    }
-  ]
+    "protocPath": "/opt/homebrew/bin/protoc",
+    "invocations": [
+        {
+            "protoFiles": [
+                "ActorEdgeID.proto",
+                "Envelope.proto", 
+                "Serialization.proto",
+                "Invocation.proto",
+                "Transport.proto"
+            ],
+            "visibility": "Public",
+            "fileNaming": "FullPath"
+        }
+    ]
 }

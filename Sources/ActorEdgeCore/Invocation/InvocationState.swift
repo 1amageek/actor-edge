@@ -16,7 +16,7 @@ public enum InvocationEncoderState {
 /// Based on swift-distributed-actors ClusterInvocationDecoder state patterns
 public enum InvocationDecoderState {
     /// Decoding from a remote call message
-    case remoteCall(InvocationMessage)
+    case remoteCall(InvocationData)
     
     /// Decoding from a local call (proxy optimization)
     case localCall(ActorEdgeInvocationEncoder)
@@ -34,6 +34,7 @@ public enum ResultHandlerState {
         callID: String,
         responseWriter: any ResponseWriter
     )
+    
 }
 
 /// Protocol for writing responses back to remote callers
@@ -45,85 +46,83 @@ public protocol ResponseWriter: Sendable {
     func writeVoid() async throws
     
     /// Write an error response
-    func writeError(_ error: RemoteCallError) async throws
+    func writeError(_ error: SerializedError) async throws
 }
 
-/// Response writer implementation for gRPC streaming responses
-public struct GRPCResponseWriter: ResponseWriter {
+/// Response writer implementation for envelope-based responses
+public struct EnvelopeResponseWriter: ResponseWriter {
     private let callID: String
-    private let writeResponse: @Sendable (Actoredge_RemoteCallResponse) async throws -> Void
+    private let recipient: ActorEdgeID
+    private let sender: ActorEdgeID?
+    private let writeEnvelope: @Sendable (Envelope) async throws -> Void
     
-    public init(callID: String, writeResponse: @escaping @Sendable (Actoredge_RemoteCallResponse) async throws -> Void) {
+    public init(
+        callID: String,
+        recipient: ActorEdgeID,
+        sender: ActorEdgeID? = nil,
+        writeEnvelope: @escaping @Sendable (Envelope) async throws -> Void
+    ) {
         self.callID = callID
-        self.writeResponse = writeResponse
+        self.recipient = recipient
+        self.sender = sender
+        self.writeEnvelope = writeEnvelope
     }
     
     public func writeSuccess(_ data: Data) async throws {
-        let response = Actoredge_RemoteCallResponse.with {
-            $0.callID = callID
-            $0.value = data
-        }
-        try await writeResponse(response)
+        print("🔵 [DEBUG] EnvelopeResponseWriter.writeSuccess called, dataSize: \(data.count)")
+        
+        let responseData = ResponseData(result: .success(data))
+        let payload = try JSONEncoder().encode(responseData)
+        
+        let envelope = Envelope.response(
+            to: recipient,
+            from: sender,
+            callID: callID,
+            manifest: SerializationManifest(serializerID: "json", hint: "ResponseData"),
+            payload: payload
+        )
+        
+        print("🔵 [DEBUG] Writing success response envelope")
+        try await writeEnvelope(envelope)
+        print("🟢 [DEBUG] Success response written")
     }
     
     public func writeVoid() async throws {
-        // For void returns, send empty data
-        let response = Actoredge_RemoteCallResponse.with {
-            $0.callID = callID
-            $0.value = Data()
-        }
-        try await writeResponse(response)
+        print("🔵 [DEBUG] EnvelopeResponseWriter.writeVoid called")
+        
+        let responseData = ResponseData(result: .void)
+        let payload = try JSONEncoder().encode(responseData)
+        
+        let envelope = Envelope.response(
+            to: recipient,
+            from: sender,
+            callID: callID,
+            manifest: SerializationManifest(serializerID: "json", hint: "ResponseData"),
+            payload: payload
+        )
+        
+        print("🔵 [DEBUG] Writing void response envelope")
+        try await writeEnvelope(envelope)
+        print("🟢 [DEBUG] Void response written")
     }
     
-    public func writeError(_ error: RemoteCallError) async throws {
-        let errorEnvelope = createErrorEnvelope(from: error)
-        let response = Actoredge_RemoteCallResponse.with {
-            $0.callID = callID
-            $0.error = errorEnvelope
-        }
-        try await writeResponse(response)
-    }
-    
-    private func createErrorEnvelope(from error: RemoteCallError) -> Actoredge_ErrorEnvelope {
-        switch error {
-        case .generic(let message):
-            return Actoredge_ErrorEnvelope.with {
-                $0.typeURL = "RemoteCallError.generic"
-                $0.data = Data(message.utf8)
-                $0.description_p = message
-            }
-        case .codableError(let data, let typeName):
-            return Actoredge_ErrorEnvelope.with {
-                $0.typeURL = typeName
-                $0.data = data
-                $0.description_p = "Codable error of type \(typeName)"
-            }
-        case .timedOut(let callID):
-            return Actoredge_ErrorEnvelope.with {
-                $0.typeURL = "RemoteCallError.timedOut"
-                $0.data = Data(callID.utf8)
-                $0.description_p = "Call timed out: \(callID)"
-            }
-        case .systemShutDown:
-            return Actoredge_ErrorEnvelope.with {
-                $0.typeURL = "RemoteCallError.systemShutDown"
-                $0.data = Data()
-                $0.description_p = "System is shutting down"
-            }
-        case .invalidReply(let callID):
-            return Actoredge_ErrorEnvelope.with {
-                $0.typeURL = "RemoteCallError.invalidReply"
-                $0.data = Data(callID.utf8)
-                $0.description_p = "Invalid reply for call: \(callID)"
-            }
-        case .illegalReplyType(let callID, let expected, let got):
-            let errorData = "\(callID)|\(expected)|\(got)"
-            return Actoredge_ErrorEnvelope.with {
-                $0.typeURL = "RemoteCallError.illegalReplyType"
-                $0.data = Data(errorData.utf8)
-                $0.description_p = "Illegal reply type for call \(callID), expected: \(expected), got: \(got)"
-            }
-        }
+    public func writeError(_ error: SerializedError) async throws {
+        print("🔴 [DEBUG] EnvelopeResponseWriter.writeError called: \(error)")
+        
+        let responseData = ResponseData(result: .error(error))
+        let payload = try JSONEncoder().encode(responseData)
+        
+        let envelope = Envelope.error(
+            to: recipient,
+            from: sender,
+            callID: callID,
+            manifest: SerializationManifest(serializerID: "json", hint: "ResponseData"),
+            payload: payload
+        )
+        
+        print("🔴 [DEBUG] Writing error response envelope")
+        try await writeEnvelope(envelope)
+        print("🔴 [DEBUG] Error response written")
     }
 }
 
@@ -148,4 +147,39 @@ public struct CallIDGenerator {
 public extension CodingUserInfoKey {
     /// Key for storing serialization context
     static let serializationContextKey = CodingUserInfoKey(rawValue: "SerializationContext")!
+}
+
+/// Response writer that signals completion after writing
+public struct CompletingResponseWriter: ResponseWriter {
+    private let base: any ResponseWriter
+    private let continuation: AsyncStream<Void>.Continuation
+    
+    public init(base: any ResponseWriter, continuation: AsyncStream<Void>.Continuation) {
+        self.base = base
+        self.continuation = continuation
+    }
+    
+    public func writeSuccess(_ data: Data) async throws {
+        print("🔵 [DEBUG] CompletingResponseWriter.writeSuccess called")
+        try await base.writeSuccess(data)
+        print("🔵 [DEBUG] CompletingResponseWriter signaling completion")
+        continuation.yield(())
+        continuation.finish()
+    }
+    
+    public func writeVoid() async throws {
+        print("🔵 [DEBUG] CompletingResponseWriter.writeVoid called")
+        try await base.writeVoid()
+        print("🔵 [DEBUG] CompletingResponseWriter signaling completion")
+        continuation.yield(())
+        continuation.finish()
+    }
+    
+    public func writeError(_ error: SerializedError) async throws {
+        print("🔴 [DEBUG] CompletingResponseWriter.writeError called")
+        try await base.writeError(error)
+        print("🔴 [DEBUG] CompletingResponseWriter signaling completion")
+        continuation.yield(())
+        continuation.finish()
+    }
 }

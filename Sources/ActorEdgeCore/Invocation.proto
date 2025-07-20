@@ -1,0 +1,45 @@
+//===----------------------------------------------------------------------===//
+// ActorEdge distributed method invocation data
+//===----------------------------------------------------------------------===//
+
+syntax = "proto3";
+
+option optimize_for = SPEED;
+option swift_prefix = "ActorEdge";
+
+import "Serialization.proto";
+
+// Invocation data structure
+message InvocationData {
+    repeated SerializedArgument arguments = 1;
+    repeated string generic_substitutions = 2;
+    bool is_void = 3;
+}
+
+// Serialized argument with its manifest
+message SerializedArgument {
+    bytes data = 1;
+    Manifest manifest = 2;
+}
+
+// Response data structure
+message ResponseData {
+    oneof result {
+        bytes success_data = 1;     // Successful result
+        ErrorData error = 2;        // Error result
+        VoidResult void = 3;        // Void result
+    }
+    Manifest manifest = 4;          // Result type manifest
+}
+
+// Error information
+message ErrorData {
+    string type = 1;                // Error type
+    string message = 2;             // Error message
+    bytes serialized_error = 3;     // Serialized error (if Codable)
+}
+
+// Void result marker
+message VoidResult {
+    // Empty message to represent void return
+}

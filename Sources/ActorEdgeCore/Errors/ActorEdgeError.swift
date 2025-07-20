@@ -3,6 +3,7 @@ import Foundation
 /// Errors that can occur in the ActorEdge system
 public enum ActorEdgeError: Error, Codable, Sendable {
     case actorNotFound(ActorEdgeID)
+    case actorTypeMismatch(ActorEdgeID, expected: String, actual: String)
     case methodNotFound(String)
     case serializationFailed(String)
     case deserializationFailed(String)
@@ -14,15 +15,20 @@ public enum ActorEdgeError: Error, Codable, Sendable {
     case missingArgument
     case invalidFormat(String)
     case invocationError(String)
-    case remoteCallFailed(RemoteCallError)
+    case remoteCallError(String)
+    case invalidEnvelope(String)
+    case connectionRejected(reason: String)
+    case protocolMismatch(String)
     
     private enum CodingKeys: String, CodingKey {
         case type
         case actorID
+        case expectedType
+        case actualType
         case method
         case message
         case errorEnvelope
-        case remoteCallError
+        case reason
     }
     
     public init(from decoder: Decoder) throws {
@@ -33,6 +39,11 @@ public enum ActorEdgeError: Error, Codable, Sendable {
         case "actorNotFound":
             let actorID = try container.decode(ActorEdgeID.self, forKey: .actorID)
             self = .actorNotFound(actorID)
+        case "actorTypeMismatch":
+            let actorID = try container.decode(ActorEdgeID.self, forKey: .actorID)
+            let expectedType = try container.decode(String.self, forKey: .expectedType)
+            let actualType = try container.decode(String.self, forKey: .actualType)
+            self = .actorTypeMismatch(actorID, expected: expectedType, actual: actualType)
         case "methodNotFound":
             let method = try container.decode(String.self, forKey: .method)
             self = .methodNotFound(method)
@@ -62,9 +73,18 @@ public enum ActorEdgeError: Error, Codable, Sendable {
         case "invocationError":
             let message = try container.decode(String.self, forKey: .message)
             self = .invocationError(message)
-        case "remoteCallFailed":
-            let remoteCallError = try container.decode(RemoteCallError.self, forKey: .remoteCallError)
-            self = .remoteCallFailed(remoteCallError)
+        case "remoteCallError":
+            let message = try container.decode(String.self, forKey: .message)
+            self = .remoteCallError(message)
+        case "invalidEnvelope":
+            let message = try container.decode(String.self, forKey: .message)
+            self = .invalidEnvelope(message)
+        case "connectionRejected":
+            let reason = try container.decode(String.self, forKey: .reason)
+            self = .connectionRejected(reason: reason)
+        case "protocolMismatch":
+            let message = try container.decode(String.self, forKey: .message)
+            self = .protocolMismatch(message)
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .type,
@@ -81,6 +101,11 @@ public enum ActorEdgeError: Error, Codable, Sendable {
         case .actorNotFound(let actorID):
             try container.encode("actorNotFound", forKey: .type)
             try container.encode(actorID, forKey: .actorID)
+        case .actorTypeMismatch(let actorID, let expectedType, let actualType):
+            try container.encode("actorTypeMismatch", forKey: .type)
+            try container.encode(actorID, forKey: .actorID)
+            try container.encode(expectedType, forKey: .expectedType)
+            try container.encode(actualType, forKey: .actualType)
         case .methodNotFound(let method):
             try container.encode("methodNotFound", forKey: .type)
             try container.encode(method, forKey: .method)
@@ -110,9 +135,18 @@ public enum ActorEdgeError: Error, Codable, Sendable {
         case .invocationError(let message):
             try container.encode("invocationError", forKey: .type)
             try container.encode(message, forKey: .message)
-        case .remoteCallFailed(let remoteCallError):
-            try container.encode("remoteCallFailed", forKey: .type)
-            try container.encode(remoteCallError, forKey: .remoteCallError)
+        case .remoteCallError(let message):
+            try container.encode("remoteCallError", forKey: .type)
+            try container.encode(message, forKey: .message)
+        case .invalidEnvelope(let message):
+            try container.encode("invalidEnvelope", forKey: .type)
+            try container.encode(message, forKey: .message)
+        case .connectionRejected(let reason):
+            try container.encode("connectionRejected", forKey: .type)
+            try container.encode(reason, forKey: .reason)
+        case .protocolMismatch(let message):
+            try container.encode("protocolMismatch", forKey: .type)
+            try container.encode(message, forKey: .message)
         }
     }
 }

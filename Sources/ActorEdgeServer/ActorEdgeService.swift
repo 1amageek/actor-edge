@@ -38,9 +38,9 @@ public actor ActorEdgeService: Service {
     
     // Managed resources
     private var eventLoopGroup: MultiThreadedEventLoopGroup?
-    private var callLifecycleManager: CallLifecycleManager?
     private var grpcServer: GRPCServer<HTTP2ServerTransport.Posix>?
     private var actorSystem: ActorEdgeSystem?
+    private var protocolIndependentServer: ActorEdgeServer?
     
     public init(configuration: Configuration) {
         self.configuration = configuration
@@ -59,68 +59,81 @@ public actor ActorEdgeService: Service {
         let elg = MultiThreadedEventLoopGroup(numberOfThreads: configuration.threads)
         eventLoopGroup = elg
         
-        // Create call lifecycle manager
-        let clm = CallLifecycleManager(
+        // Create gRPC server transport
+        let serverTransport = GRPCServerTransport(
             eventLoopGroup: elg,
             metricsNamespace: configuration.server.metrics.namespace
         )
-        callLifecycleManager = clm
         
-        // Create actor system
+        // Create actor system (server-side doesn't need transport for local actors)
         let system = ActorEdgeSystem(metricsNamespace: configuration.server.metrics.namespace)
         actorSystem = system
         
-        // Register actors
-        let actors = configuration.server.actors(actorSystem: system)
-        let providedIDs = configuration.server.actorIDs
+        // Set pre-assigned IDs before creating actors
+        system.setPreAssignedIDs(configuration.server.actorIDs)
         
-        for (index, actor) in actors.enumerated() {
-            let actorID: ActorEdgeID
-            if index < providedIDs.count {
-                actorID = ActorEdgeID(providedIDs[index])
-            } else {
-                actorID = ActorEdgeID("actor-\(index)")
-            }
-            
-            await system.registerActor(actor, id: actorID)
-            logger.info("Registered actor", metadata: ["id": "\(actorID)", "type": "\(type(of: actor))"])
+        // Create actors - they will use the pre-assigned IDs
+        let actors = configuration.server.actors(actorSystem: system)
+        
+        // Log the actors that were created
+        for actor in actors {
+            logger.info("Created actor", metadata: ["type": "\(type(of: actor))"])
         }
         
-        // Configure transport security
-        let transportSecurity = configureTransportSecurity()
+        // Create protocol-independent server
+        let server = ActorEdgeServer(system: system, transport: serverTransport)
+        protocolIndependentServer = server
+        
+        // Create HTTP/2 transport for gRPC
+        let host = configuration.server.host
+        let port = configuration.server.port
+        
+        let transportConfig: HTTP2ServerTransport.Posix
+        if configuration.server.tls != nil {
+            // TODO: Configure TLS when grpc-swift 2.0 exposes the API
+            logger.warning("TLS configuration provided but not yet implemented")
+            transportConfig = HTTP2ServerTransport.Posix(
+                address: .ipv4(host: host, port: port),
+                transportSecurity: .plaintext
+            )
+        } else {
+            transportConfig = HTTP2ServerTransport.Posix(
+                address: .ipv4(host: host, port: port),
+                transportSecurity: .plaintext
+            )
+        }
         
         // Create gRPC server
-        let server = GRPCServer(
-            transport: HTTP2ServerTransport.Posix(
-                address: .ipv4(host: configuration.server.host, port: configuration.server.port),
-                transportSecurity: transportSecurity,
-                config: .defaults { config in
-                    config.http2.targetWindowSize = 65536
-                    config.http2.maxFrameSize = 16384
-                }
-            ),
-            services: [DistributedActorService(system: system)],
-            interceptors: configuration.server.middleware.compactMap { $0.asGRPCInterceptor() }
-        )
-        grpcServer = server
+        let grpc = GRPCServer(transport: transportConfig, services: [serverTransport])
+        grpcServer = grpc
         
         logger.info("ActorEdge service configured", metadata: [
-            "host": "\(configuration.server.host)",
-            "port": "\(configuration.server.port)",
+            "host": "\(host)",
+            "port": "\(port)",
             "tls": "\(configuration.server.tls != nil)",
             "maxConnections": "\(configuration.server.maxConnections)"
         ])
         
-        // Monitor lifecycle manager state
-        Task {
-            guard let clm = self.callLifecycleManager else { return }
-            for await state in clm.states {
-                logger.info("CallLifecycleManager state changed", metadata: ["state": "\(state)"])
+        // Start both servers concurrently
+        await withTaskGroup(of: Void.self) { group in
+            // Start the protocol-independent server
+            group.addTask {
+                do {
+                    try await server.start()
+                } catch {
+                    self.logger.error("Protocol-independent server error", metadata: ["error": "\(error)"])
+                }
+            }
+            
+            // Start the gRPC server
+            group.addTask {
+                do {
+                    try await grpc.serve()
+                } catch {
+                    self.logger.error("gRPC server error", metadata: ["error": "\(error)"])
+                }
             }
         }
-        
-        // Run the gRPC server
-        try await server.serve()
     }
     
     // MARK: - Graceful Shutdown
@@ -128,20 +141,16 @@ public actor ActorEdgeService: Service {
     public func shutdown() async throws {
         logger.info("Starting graceful shutdown...")
         
-        // Calculate dynamic grace period based on in-flight calls
-        let gracePeriod = calculateGracePeriod()
-        logger.info("Grace period calculated", metadata: [
-            "seconds": "\(gracePeriod.nanoseconds / 1_000_000_000)"
-        ])
+        // Stop the gRPC server
+        // Note: GRPCServer in grpc-swift 2.0 doesn't have explicit stop method
+        // It will be stopped when the task is cancelled
+        logger.info("Cancelling gRPC server task")
         
-        // Drain in-flight calls
-        if let clm = callLifecycleManager {
-            let deadline = NIODeadline.now() + gracePeriod
-            await clm.drain(until: deadline)
+        // Stop the protocol-independent server
+        if let server = protocolIndependentServer {
+            try await server.shutdown()
+            logger.info("Protocol-independent server stopped")
         }
-        
-        // Note: GRPCServer will be stopped when the run() method completes
-        logger.info("gRPC server will stop when run() completes")
         
         // Shutdown event loop group
         if let elg = eventLoopGroup {
@@ -152,45 +161,5 @@ public actor ActorEdgeService: Service {
         logger.info("Graceful shutdown completed")
     }
     
-    // MARK: - Private Helpers
-    
-    private func configureTransportSecurity() -> HTTP2ServerTransport.Posix.TransportSecurity {
-        if let tlsConfig = configuration.server.tls {
-            if tlsConfig.certificateChainSources.isEmpty {
-                logger.warning("TLS configuration provided but no certificates found. Using plaintext.")
-                return .plaintext
-            } else {
-                // TODO: Full TLS support when grpc-swift 2.0 exposes the API
-                logger.warning("TLS configuration provided. Note: Full TLS support is limited in grpc-swift 2.0.")
-                return .plaintext
-            }
-        }
-        return .plaintext
-    }
-    
-    private func calculateGracePeriod() -> TimeAmount {
-        guard let clm = callLifecycleManager else {
-            return configuration.minGracePeriod
-        }
-        
-        let inFlightCount = clm.inFlightCount
-        let calculatedGrace = TimeAmount.seconds(
-            Int64(Double(inFlightCount) * configuration.avgLatencySeconds)
-        )
-        
-        // Return the maximum of minimum grace period and calculated grace
-        return max(configuration.minGracePeriod, calculatedGrace)
-    }
 }
 
-// MARK: - ActorEdgeSystem Server Extensions
-
-extension ActorEdgeSystem {
-    /// Register any distributed actor with the system
-    func registerActor(_ actor: any DistributedActor, id: ActorEdgeID) async {
-        guard let registry = registry else {
-            return
-        }
-        await registry.register(actor, id: id)
-    }
-}

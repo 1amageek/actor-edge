@@ -1,41 +1,51 @@
+//===----------------------------------------------------------------------===//
+//
+// This source file is part of the ActorEdge open source project
+//
+// Copyright (c) 2024 ActorEdge contributors
+// Licensed under Apache License v2.0 with Runtime Library Exception
+//
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+//
+//===----------------------------------------------------------------------===//
+
 import Distributed
 import Foundation
 
-/// Encoder for distributed actor method invocations
-/// Based on swift-distributed-actors ClusterInvocationEncoder patterns
+/// Encoder for distributed actor method invocations.
+///
+/// This encoder implements Swift Distributed's `DistributedTargetInvocationEncoder`
+/// protocol to capture method invocation details for transport across the network.
+/// It follows the exact API contract required by the Swift runtime.
 public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
     public typealias SerializationRequirement = Codable & Sendable
     
-    // MARK: - Internal State (following swift-distributed-actors pattern)
+    // MARK: - Internal State
     
-    /// Serialized arguments as Data array
-    private(set) var arguments: [Data] = []
-    
-    /// Manifests for each argument
-    private(set) var manifests: [Serialization.Manifest] = []
+    /// Serialized arguments with their manifests
+    private var arguments: [SerializedArgument] = []
     
     /// Generic type substitutions as mangled type names
-    private(set) var genericSubstitutions: [String] = []
+    private var genericSubstitutions: [String] = []
     
-    /// Return type information (optional)
-    private var returnTypeInfo: String?
+    /// Whether the method returns Void
+    private var isVoid: Bool = false
     
-    /// Error type information (optional) 
-    private var errorTypeInfo: String?
+    /// Whether the method can throw
+    private var canThrow: Bool = false
     
-    /// Indicates if the method throws
-    private(set) var throwing: Bool = false
+    /// Return type information (mangled type name)
+    private var returnType: String?
+    
+    /// Error type information (mangled type name)
+    private var errorType: String?
     
     /// Current encoding state
-    internal private(set) var state: InvocationEncoderState = .recording
+    internal private(set) var state: EncodingState = .recording
     
-    /// Reference to the actor system for serialization
+    /// Reference to the actor system
     private let system: ActorEdgeSystem
-    
-    /// Serialization system for encoding arguments
-    private var serialization: Serialization {
-        system.serialization
-    }
     
     // MARK: - Initialization
     
@@ -48,51 +58,56 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
     
     public mutating func recordGenericSubstitution<T>(_ type: T.Type) throws {
         guard state == .recording else {
-            throw ActorEdgeError.invocationError("Cannot record after doneRecording()")
+            throw EncodingError.invalidState("Cannot record generic substitution after doneRecording()")
         }
         
-        // Use String(reflecting:) to get type name, similar to swift-distributed-actors
-        let typeName = String(reflecting: type)
-        genericSubstitutions.append(typeName)
+        // Use mangled type name for accurate type reconstruction
+        let mangledName = String(reflecting: type)
+        genericSubstitutions.append(mangledName)
     }
     
     public mutating func recordArgument<Argument>(
         _ argument: RemoteCallArgument<Argument>
     ) throws where Argument: SerializationRequirement {
         guard state == .recording else {
-            throw ActorEdgeError.invocationError("Cannot record after doneRecording()")
+            throw EncodingError.invalidState("Cannot record argument after doneRecording()")
         }
         
-        // Serialize argument value with manifest using ActorEdgeSerialization
-        let (buffer, manifest) = try serialization.serializeWithManifest(argument.value, system: system)
-        arguments.append(buffer.readData())
-        manifests.append(manifest)
+        // Serialize using the new SerializationSystem
+        let serialized = try system.serialization.serialize(argument.value)
+        
+        arguments.append(SerializedArgument(
+            data: serialized.data,
+            manifest: serialized.manifest,
+            label: argument.label
+        ))
     }
     
     public mutating func recordReturnType<R>(
         _ returnType: R.Type
     ) throws where R: SerializationRequirement {
         guard state == .recording else {
-            throw ActorEdgeError.invocationError("Cannot record after doneRecording()")
+            throw EncodingError.invalidState("Cannot record return type after doneRecording()")
         }
         
-        // Record return type info (not used in swift-distributed-actors, but kept for completeness)
-        returnTypeInfo = String(reflecting: returnType)
+        // Check if void return
+        isVoid = returnType == Void.self
+        self.returnType = String(reflecting: returnType)
     }
     
     public mutating func recordErrorType<E: Error>(_ errorType: E.Type) throws {
         guard state == .recording else {
-            throw ActorEdgeError.invocationError("Cannot record after doneRecording()")
+            throw EncodingError.invalidState("Cannot record error type after doneRecording()")
         }
         
-        // Set throwing flag (following ClusterInvocationEncoder pattern)
-        throwing = true
-        errorTypeInfo = String(reflecting: errorType)
+        // Mark as throwing method
+        canThrow = true
+        self.errorType = String(reflecting: errorType)
     }
     
     public mutating func doneRecording() throws {
         guard state == .recording else {
-            throw ActorEdgeError.invocationError("Already completed recording")
+            throw EncodingError.invalidState("Already completed recording")
         }
         
         state = .completed
@@ -100,23 +115,35 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
     
     // MARK: - Internal Access Methods
     
-    /// Create an InvocationMessage from the recorded data
-    /// Used by ActorEdgeSystem for remote calls
-    public func createInvocationMessage(
-        callID: String = CallIDGenerator.generate(),
-        targetIdentifier: String
-    ) throws -> InvocationMessage {
+    /// Finalizes the invocation data for envelope creation.
+    /// This method is called by DistributedInvocationProcessor.
+    internal func finalizeInvocation() throws -> InvocationData {
         guard state == .completed else {
-            throw ActorEdgeError.invocationError("Must call doneRecording() first")
+            throw EncodingError.invalidState("Must call doneRecording() before finalizing")
         }
         
-        return InvocationMessage(
-            callID: callID,
-            targetIdentifier: targetIdentifier,
+        // Extract data and manifests from SerializedArgument array
+        let argumentData = arguments.map { $0.data }
+        let argumentManifests = arguments.map { $0.manifest }
+        
+        return InvocationData(
+            arguments: argumentData,
+            argumentManifests: argumentManifests,
             genericSubstitutions: genericSubstitutions,
-            arguments: arguments,
-            argumentManifests: manifests
+            isVoid: isVoid
         )
     }
-    
+}
+
+// MARK: - Supporting Types
+
+/// Encoding state tracking
+internal enum EncodingState {
+    case recording
+    case completed
+}
+
+/// Encoding-specific errors
+private enum EncodingError: Error {
+    case invalidState(String)
 }
