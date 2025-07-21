@@ -61,8 +61,8 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
             throw ActorEdgeError.invocationError("Cannot record generic substitution after doneRecording()")
         }
         
-        // swift-distributed-actorsと同じアプローチ
-        let mangledName = _mangledTypeName(type) ?? String(reflecting: type)
+        // swift-distributed-actors準拠の実装
+        let mangledName = _mangledTypeName(type) ?? _typeName(type)
         
         print("🟡 [ENCODER] Recording generic substitution:")
         print("    Type: \(T.self)")

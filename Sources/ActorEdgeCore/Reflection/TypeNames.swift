@@ -40,19 +40,33 @@ internal func _swift_getTypeByMangledNameInContext(
     _ genericArguments: UnsafePointer<UnsafeRawPointer>?
 ) -> Any.Type?
 
-/// Resolves a type from its name using Swift runtime
-/// Mirrors swift-distributed-actors' _typeByName implementation
+/// swift-distributed-actors準拠の型解決
 @usableFromInline
 internal func _typeByName(_ typeName: String) -> Any.Type? {
     print("🔵 [TYPE_RESOLUTION] Attempting to resolve: \(typeName)")
     
-    // Try built-in types first (performance optimization)
+    // 1. Mangled nameの場合、直接Swift runtimeで解決
+    if typeName.hasPrefix("$") || (typeName.count > 10 && typeName.allSatisfy({ $0.isLetter || $0.isNumber })) {
+        if let type = typeName.withCString({ namePtr in
+            _swift_getTypeByMangledNameInContext(
+                namePtr,
+                typeName.utf8.count,
+                nil,
+                nil
+            )
+        }) {
+            print("🟢 [TYPE_RESOLUTION] Resolved: \(typeName) -> \(type)")
+            return type
+        }
+    }
+    
+    // 2. ビルトイン型の最適化
     if let builtinType = _resolveBuiltinType(typeName) {
-        print("🟢 [TYPE_RESOLUTION] Resolved as builtin: \(typeName) -> \(builtinType)")
+        print("🟢 [TYPE_RESOLUTION] Builtin: \(typeName) -> \(builtinType)")
         return builtinType
     }
     
-    // Try Swift runtime type resolution
+    // 3. Swift runtime での一般解決
     let result = typeName.withCString { namePtr in
         _swift_getTypeByMangledNameInContext(
             namePtr,
@@ -63,17 +77,11 @@ internal func _typeByName(_ typeName: String) -> Any.Type? {
     }
     
     if let type = result {
-        print("🟢 [TYPE_RESOLUTION] Resolved via runtime: \(typeName) -> \(type)")
+        print("🟢 [TYPE_RESOLUTION] Runtime: \(typeName) -> \(type)")
         return type
     }
     
-    // Fallback: Try NSClassFromString for @objc types
-    if let type = NSClassFromString(typeName) {
-        print("🟢 [TYPE_RESOLUTION] Resolved via NSClassFromString: \(typeName) -> \(type)")
-        return type
-    }
-    
-    print("🔴 [TYPE_RESOLUTION] Failed to resolve: \(typeName)")
+    print("🔴 [TYPE_RESOLUTION] Failed: \(typeName)")
     return nil
 }
 
@@ -103,42 +111,8 @@ private func _resolveBuiltinType(_ typeName: String) -> Any.Type? {
         return [Int].self
     case "Swift.Dictionary<Swift.String, Swift.String>", "Dictionary<String, String>":
         return [String: String].self
-    // Add support for SampleChatShared.Message
-    case "SampleChatShared.Message":
-        // Dynamically resolve Message type to avoid import cycles
-        return _tryResolveMessageType()
     default:
         return nil
     }
 }
 
-/// Dynamically resolve Message type without direct import
-private func _tryResolveMessageType() -> Any.Type? {
-    // Use NSClassFromString first as it's most reliable for @objc types
-    if let type = NSClassFromString("SampleChatShared.Message") {
-        return type
-    }
-    
-    // Try runtime type resolution with variations
-    let variations = [
-        "SampleChatShared.Message",
-        "Message",
-        "16SampleChatShared7MessageV", // Mangled name
-        "SampleChatShared_Message"
-    ]
-    
-    for variation in variations {
-        if let type = variation.withCString({ namePtr in
-            _swift_getTypeByMangledNameInContext(
-                namePtr,
-                variation.utf8.count,
-                nil,
-                nil
-            )
-        }) {
-            return type
-        }
-    }
-    
-    return nil
-}

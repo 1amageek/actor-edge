@@ -28,7 +28,7 @@ public distributed actor ChatActor: Chat {
     // MARK: - Chat Implementation
     
     public distributed func send(_ message: Message) async throws {
-        logger.info("Received message from \\(message.username): \\(message.content)")
+        logger.info("Received message from \(message.username): \(message.content)")
         
         // Store the message
         messages.append(message)
@@ -46,13 +46,13 @@ public distributed actor ChatActor: Chat {
     
     public distributed func getRecentMessages(limit: Int) async throws -> [Message] {
         let recentMessages = Array(messages.suffix(limit))
-        logger.info("Sending \\(recentMessages.count) recent messages")
+        logger.info("Sending \(recentMessages.count) recent messages")
         return recentMessages
     }
     
     public distributed func getMessagesSince(_ timestamp: Date, username: String) async throws -> [Message] {
         let filteredMessages = messages.filter { $0.timestamp > timestamp }
-        logger.info("Sending \\(filteredMessages.count) messages since \\(timestamp) for \\(username)")
+        logger.info("Sending \(filteredMessages.count) messages since \(timestamp) for \(username)")
         return filteredMessages
     }
 }
