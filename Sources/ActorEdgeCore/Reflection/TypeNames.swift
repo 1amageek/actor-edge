@@ -43,8 +43,6 @@ internal func _swift_getTypeByMangledNameInContext(
 /// swift-distributed-actors準拠の型解決
 @usableFromInline
 internal func _typeByName(_ typeName: String) -> Any.Type? {
-    print("🔵 [TYPE_RESOLUTION] Attempting to resolve: \(typeName)")
-    
     // 1. Mangled nameの場合、直接Swift runtimeで解決
     if typeName.hasPrefix("$") || (typeName.count > 10 && typeName.allSatisfy({ $0.isLetter || $0.isNumber })) {
         if let type = typeName.withCString({ namePtr in
@@ -55,14 +53,12 @@ internal func _typeByName(_ typeName: String) -> Any.Type? {
                 nil
             )
         }) {
-            print("🟢 [TYPE_RESOLUTION] Resolved: \(typeName) -> \(type)")
             return type
         }
     }
     
     // 2. ビルトイン型の最適化
     if let builtinType = _resolveBuiltinType(typeName) {
-        print("🟢 [TYPE_RESOLUTION] Builtin: \(typeName) -> \(builtinType)")
         return builtinType
     }
     
@@ -77,11 +73,9 @@ internal func _typeByName(_ typeName: String) -> Any.Type? {
     }
     
     if let type = result {
-        print("🟢 [TYPE_RESOLUTION] Runtime: \(typeName) -> \(type)")
         return type
     }
     
-    print("🔴 [TYPE_RESOLUTION] Failed: \(typeName)")
     return nil
 }
 

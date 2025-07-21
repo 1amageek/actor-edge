@@ -21,7 +21,6 @@ public struct Message: Codable, Sendable {
     public static func _forceTypeRetention() {
         _ = Message.self
         _ = String(reflecting: Message.self)
-        print("Message type retained in binary: \(String(reflecting: Message.self))")
     }
 }
 
@@ -41,27 +40,12 @@ public protocol Chat: DistributedActor where ActorSystem == ActorEdgeSystem {
 // Debug helper for type resolution
 public enum ChatDebug {
     public static func printTypeInfo() {
-        print("\n=== Type Resolution Debug Info ===")
-        
-        // 型保持を強制
+        // Force type retention for runtime resolution
         Message._forceTypeRetention()
         
-        print("Message type: \(String(reflecting: Message.self))")
-        
-        // Mangled nameのテスト
+        // Test type resolution without debug output
         if let mangledName = _mangledTypeName(Message.self) {
-            print("Mangled name: \(mangledName)")
-            
-            // 実際に解決できるかテスト
-            if let resolved = _typeByName(mangledName) {
-                print("✅ Mangled name resolved: \(resolved)")
-            } else {
-                print("❌ Mangled name resolution failed")
-            }
-        } else {
-            print("❌ No mangled name available")
+            _ = _typeByName(mangledName)
         }
-        
-        print("==================================\n")
     }
 }

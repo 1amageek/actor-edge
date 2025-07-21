@@ -74,8 +74,6 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
             substitutions = invocationData.genericSubstitutions
         }
         
-        print("🔵 [DECODER] Processing generic substitutions: \(substitutions)")
-        
         if substitutions.isEmpty {
             return []
         }
@@ -83,14 +81,12 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
         // swift-distributed-actorsと同じく、型が見つからない場合はエラーを投げる
         return try substitutions.map { typeName in
             guard let type = _typeByName(typeName) else {
-                print("🔴 [DECODER] Failed to resolve type: \(typeName)")
                 throw ActorEdgeError.deserializationFailed(
                     "Unable to resolve type '\(typeName)' for generic substitution. " +
                     "Ensure the type is available in the runtime and properly linked."
                 )
             }
             
-            print("🟢 [DECODER] Successfully resolved: \(typeName) -> \(type)")
             return type
         }
     }

@@ -63,11 +63,6 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
         
         // swift-distributed-actors準拠の実装
         let mangledName = _mangledTypeName(type) ?? _typeName(type)
-        
-        print("🟡 [ENCODER] Recording generic substitution:")
-        print("    Type: \(T.self)")
-        print("    Mangled name: \(mangledName)")
-        
         genericSubstitutions.append(mangledName)
     }
     

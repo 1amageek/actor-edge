@@ -84,15 +84,11 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
     
     public func resolve<Act>(id: ActorID, as actorType: Act.Type) throws -> Act? 
         where Act: DistributedActor, Act.ID == ActorID {
-        print("🔵 [DEBUG] ActorEdgeSystem.resolve called: id=\(id), type=\(actorType)")
-        
         // First check if we have this actor locally (both client and server can have local actors)
         if let registry = registry {
             if let actor = registry.find(id: id) {
-                print("🟢 [DEBUG] Found actor locally in registry")
                 // Try to cast to the requested type
                 guard let typedActor = actor as? Act else {
-                    print("🔴 [DEBUG] Type mismatch: expected \(Act.self), got \(type(of: actor))")
                     throw ActorEdgeError.actorTypeMismatch(id, expected: "\(Act.self)", actual: "\(type(of: actor))")
                 }
                 return typedActor
@@ -101,7 +97,6 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
         
         // If not found locally, return nil to let the runtime create a remote proxy
         // This allows the @Resolvable macro to generate the appropriate stub
-        print("🔵 [DEBUG] Actor not found locally, returning nil for remote proxy creation")
         return nil
     }
     
@@ -131,7 +126,6 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
         if let registry = registry {
             // Check if the actor's ID type is ActorEdgeID
             if let actorID = actor.id as? ActorEdgeID {
-                print("🔵 [DEBUG] Registering actor: \(actorID)")
                 registry.register(actor, id: actorID)
             }
         }
@@ -144,7 +138,6 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
         
         // Unregister actor from registry if available
         if let registry = registry {
-            print("🔵 [DEBUG] Unregistering actor: \(id)")
             registry.unregister(id: id)
         }
     }
@@ -217,10 +210,6 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
     where Act: DistributedActor,
           Act.ID == ActorID,
           Err: Error {
-        logger.debug("remoteCallVoid called", metadata: [
-            "actorID": "\(actor.id)",
-            "method": "\(target.identifier)"
-        ])
         
         guard let transport = transport else {
             throw ActorEdgeError.transportError("No transport configured")
