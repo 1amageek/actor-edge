@@ -4,15 +4,8 @@ import Distributed
 @testable import ActorEdgeCore
 
 /// Test suite for ActorEdge serialization functionality
-@Suite("Serialization Tests")
+@Suite("Serialization Tests", .tags(.serialization, .unit))
 struct SerializationTests {
-    
-    // MARK: - Test Helpers
-    
-    /// Create a test actor system
-    func createTestSystem() -> ActorEdgeSystem {
-        return ActorEdgeSystem()
-    }
     
     // MARK: - Test Types
     
@@ -37,7 +30,7 @@ struct SerializationTests {
     
     @Test("Encode simple argument")
     func testEncodeSimpleArgument() async throws {
-        let system = createTestSystem()
+        let system = TestHelpers.makeTestActorSystem()
         var encoder = ActorEdgeInvocationEncoder(system: system)
         
         let message = SimpleMessage(id: 42, message: "Hello")
@@ -60,7 +53,7 @@ struct SerializationTests {
     
     @Test("Encode multiple arguments")
     func testEncodeMultipleArguments() async throws {
-        let system = createTestSystem()
+        let system = TestHelpers.makeTestActorSystem()
         var encoder = ActorEdgeInvocationEncoder(system: system)
         
         let arg1 = RemoteCallArgument(label: nil, name: "arg1", value: "Hello")
@@ -89,7 +82,7 @@ struct SerializationTests {
     
     @Test("Encode complex types")
     func testEncodeComplexTypes() async throws {
-        let system = createTestSystem()
+        let system = TestHelpers.makeTestActorSystem()
         var encoder = ActorEdgeInvocationEncoder(system: system)
         
         let date = Date()
@@ -118,7 +111,7 @@ struct SerializationTests {
     
     @Test("Encode generic substitutions")
     func testEncodeGenericSubstitutions() async throws {
-        let system = createTestSystem()
+        let system = TestHelpers.makeTestActorSystem()
         var encoder = ActorEdgeInvocationEncoder(system: system)
         
         try encoder.recordGenericSubstitution(String.self)
@@ -137,7 +130,7 @@ struct SerializationTests {
     
     @Test("Encode return and error types")
     func testEncodeReturnAndErrorTypes() async throws {
-        let system = createTestSystem()
+        let system = TestHelpers.makeTestActorSystem()
         var encoder = ActorEdgeInvocationEncoder(system: system)
         
         try encoder.recordReturnType(String.self)
@@ -154,7 +147,7 @@ struct SerializationTests {
     @Test("Decode simple argument")
     func testDecodeSimpleArgument() async throws {
         // First encode
-        let system = createTestSystem()
+        let system = TestHelpers.makeTestActorSystem()
         var encoder = ActorEdgeInvocationEncoder(system: system)
         let message = SimpleMessage(id: 123, message: "Test")
         let argument = RemoteCallArgument(label: nil, name: "arg", value: message)
@@ -172,7 +165,7 @@ struct SerializationTests {
     @Test("Decode multiple arguments")
     func testDecodeMultipleArguments() async throws {
         // Encode multiple arguments
-        let system = createTestSystem()
+        let system = TestHelpers.makeTestActorSystem()
         var encoder = ActorEdgeInvocationEncoder(system: system)
         
         try encoder.recordArgument(RemoteCallArgument(label: nil, name: "arg", value: "First"))
@@ -198,7 +191,7 @@ struct SerializationTests {
     @Test("Decode with missing argument error")
     func testDecodeMissingArgument() async throws {
         // Encode one argument
-        let system = createTestSystem()
+        let system = TestHelpers.makeTestActorSystem()
         var encoder = ActorEdgeInvocationEncoder(system: system)
         try encoder.recordArgument(RemoteCallArgument(label: nil, name: "arg", value: "Only one"))
         try encoder.doneRecording()
@@ -223,7 +216,7 @@ struct SerializationTests {
     @Test("Decode with system initializer")
     func testDecodeWithSystemInitializer() async throws {
         // Create encoded data
-        let system = createTestSystem()
+        let system = TestHelpers.makeTestActorSystem()
         var encoder = ActorEdgeInvocationEncoder(system: system)
         try encoder.recordArgument(RemoteCallArgument(label: nil, name: "arg", value: "Test with system"))
         try encoder.doneRecording()
@@ -237,7 +230,7 @@ struct SerializationTests {
     
     @Test("Decode with invalid data")
     func testDecodeWithInvalidData() async throws {
-        let system = createTestSystem()
+        let system = TestHelpers.makeTestActorSystem()
         let _ = Data("invalid json".utf8)
         
         // We can't test invalid data directly with the current API
@@ -261,7 +254,7 @@ struct SerializationTests {
     
     @Test("Date encoding and decoding")
     func testDateEncodingDecoding() async throws {
-        let system = createTestSystem()
+        let system = TestHelpers.makeTestActorSystem()
         var encoder = ActorEdgeInvocationEncoder(system: system)
         
         let now = Date()
@@ -282,7 +275,7 @@ struct SerializationTests {
     
     @Test("Array encoding and decoding")
     func testArrayEncodingDecoding() async throws {
-        let system = createTestSystem()
+        let system = TestHelpers.makeTestActorSystem()
         var encoder = ActorEdgeInvocationEncoder(system: system)
         
         let array = [1, 2, 3, 4, 5]
@@ -299,7 +292,7 @@ struct SerializationTests {
     
     @Test("Dictionary encoding and decoding")
     func testDictionaryEncodingDecoding() async throws {
-        let system = createTestSystem()
+        let system = TestHelpers.makeTestActorSystem()
         var encoder = ActorEdgeInvocationEncoder(system: system)
         
         let dict = ["apple": 1, "banana": 2, "cherry": 3]
@@ -318,7 +311,7 @@ struct SerializationTests {
     
     @Test("Performance of large payload encoding")
     func testLargePayloadPerformance() async throws {
-        let system = createTestSystem()
+        let system = TestHelpers.makeTestActorSystem()
         var encoder = ActorEdgeInvocationEncoder(system: system)
         
         // Create a large array

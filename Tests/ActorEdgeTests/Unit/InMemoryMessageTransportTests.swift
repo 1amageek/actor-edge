@@ -4,7 +4,7 @@ import Distributed
 @testable import ActorEdgeCore
 
 /// Test suite for InMemoryMessageTransport functionality
-@Suite("InMemoryMessageTransport Tests")
+@Suite("InMemoryMessageTransport Tests", .tags(.transport))
 struct InMemoryMessageTransportTests {
     
     // MARK: - Test Data
@@ -352,5 +352,263 @@ struct InMemoryMessageTransportTests {
         let throughput = Double(messageCount) / duration
         
         #expect(throughput > 1000, "Should handle > 1000 messages per second")
+    }
+    
+    // MARK: - Enhanced Test Scenarios from Instructions
+    
+    @Test("Basic send and receive with response")
+    func basicSendReceiveWithResponse() async throws {
+        let (clientTransport, serverTransport) = InMemoryMessageTransport.createConnectedPair()
+        
+        let envelope = Envelope.invocation(
+            to: ActorEdgeID("test-actor"),
+            target: "echo",
+            manifest: SerializationManifest.json(),
+            payload: "Hello".data(using: .utf8)!
+        )
+        
+        // Set up server to echo messages
+        serverTransport.setMessageHandler { receivedEnvelope in
+            #expect(receivedEnvelope.recipient.value == "test-actor")
+            
+            return Envelope.response(
+                to: receivedEnvelope.sender ?? receivedEnvelope.recipient,
+                callID: receivedEnvelope.metadata.callID,
+                manifest: receivedEnvelope.manifest,
+                payload: receivedEnvelope.payload
+            )
+        }
+        
+        // Send and wait for response
+        let response = try await clientTransport.send(envelope)
+        #expect(response != nil)
+        #expect(response?.messageType == .response)
+        
+        let responseContent = String(data: response?.payload ?? Data(), encoding: .utf8)
+        #expect(responseContent == "Hello")
+    }
+    
+    @Test("Connection lifecycle management")
+    func connectionLifecycleManagement() async throws {
+        let transport = InMemoryMessageTransport()
+        
+        #expect(transport.isConnected)
+        
+        try await transport.close()
+        #expect(!transport.isConnected)
+        
+        // Verify that attempting to use a closed transport throws
+        let envelope = TestData.createEnvelope()
+        await #expect(throws: TransportError.self) {
+            _ = try await transport.send(envelope)
+        }
+    }
+    
+    @Test("Transport metadata verification")
+    func transportMetadataVerification() async throws {
+        let transport = InMemoryMessageTransport()
+        let metadata = transport.metadata
+        
+        #expect(metadata.transportType == "in-memory")
+        #expect(metadata.isSecure == true)
+        #expect(metadata.endpoint?.hasPrefix("memory://") == true)
+    }
+    
+    @Test("Paired transport bidirectional communication")
+    func pairedTransportBidirectionalCommunication() async throws {
+        let transport1 = InMemoryMessageTransport()
+        let transport2 = InMemoryMessageTransport()
+        
+        transport1.pair(with: transport2)
+        
+        let envelope = Envelope.invocation(
+            to: ActorEdgeID("target"),
+            target: "test",
+            manifest: SerializationManifest.json(),
+            payload: Data()
+        )
+        
+        // Set up handler on transport2
+        var receivedEnvelope: Envelope?
+        transport2.setMessageHandler { envelope in
+            receivedEnvelope = envelope
+            return nil
+        }
+        
+        // Send from transport1
+        _ = try await transport1.send(envelope)
+        
+        // Wait a bit for async processing
+        try await Task.sleep(for: .milliseconds(100))
+        
+        #expect(receivedEnvelope != nil)
+        #expect(receivedEnvelope?.recipient.value == "target")
+    }
+    
+    @Test("Error handling on closed transport")
+    func errorHandlingOnClosedTransport() async throws {
+        let transport = InMemoryMessageTransport()
+        try await transport.close()
+        
+        let envelope = Envelope.invocation(
+            to: ActorEdgeID("test"),
+            target: "test",
+            manifest: SerializationManifest.json(),
+            payload: Data()
+        )
+        
+        await #expect(throws: TransportError.self) {
+            _ = try await transport.send(envelope)
+        }
+    }
+    
+    @Test("Different message types")
+    func differentMessageTypes() async throws {
+        let (clientTransport, serverTransport) = InMemoryMessageTransport.createConnectedPair()
+        
+        // Set up server to handle different message types
+        serverTransport.setMessageHandler { envelope in
+            switch envelope.messageType {
+            case .invocation:
+                return Envelope.response(
+                    to: envelope.sender ?? envelope.recipient,
+                    callID: envelope.metadata.callID,
+                    manifest: envelope.manifest,
+                    payload: "Invocation response".data(using: .utf8)!
+                )
+            case .error:
+                return Envelope.error(
+                    to: envelope.sender ?? envelope.recipient,
+                    callID: envelope.metadata.callID,
+                    manifest: envelope.manifest,
+                    payload: "Error handled".data(using: .utf8)!
+                )
+            default:
+                return nil
+            }
+        }
+        
+        // Test invocation message
+        let invocation = Envelope.invocation(
+            to: ActorEdgeID("target"),
+            target: "testMethod",
+            manifest: SerializationManifest.json(),
+            payload: "test".data(using: .utf8)!
+        )
+        
+        let response = try await clientTransport.send(invocation)
+        #expect(response?.messageType == .response)
+        
+        // Test error message
+        let errorEnvelope = Envelope.error(
+            to: ActorEdgeID("target"),
+            callID: "error-123",
+            manifest: SerializationManifest.json(),
+            payload: "test error".data(using: .utf8)!
+        )
+        
+        let errorResponse = try await clientTransport.send(errorEnvelope)
+        #expect(errorResponse?.messageType == .error)
+    }
+    
+    @Test("Multiple concurrent transports")
+    func multipleConcurrentTransports() async throws {
+        let serverTransport = InMemoryMessageTransport()
+        let clients = (0..<5).map { _ in InMemoryMessageTransport() }
+        
+        // Pair all clients with server
+        for client in clients {
+            client.pair(with: serverTransport)
+        }
+        
+        // Server handles all requests
+        var receivedCount = 0
+        serverTransport.setMessageHandler { envelope in
+            receivedCount += 1
+            return Envelope.response(
+                to: envelope.sender ?? envelope.recipient,
+                callID: envelope.metadata.callID,
+                manifest: envelope.manifest,
+                payload: Data("\(receivedCount)".utf8)
+            )
+        }
+        
+        // Send from all clients concurrently
+        let results = await withTaskGroup(of: String?.self) { group in
+            for (index, client) in clients.enumerated() {
+                group.addTask {
+                    let envelope = Envelope.invocation(
+                        to: ActorEdgeID("server"),
+                        target: "method-\(index)",
+                        manifest: SerializationManifest.json(),
+                        payload: Data()
+                    )
+                    
+                    let response = try? await client.send(envelope)
+                    return response.flatMap { String(data: $0.payload, encoding: .utf8) }
+                }
+            }
+            
+            var responses: [String?] = []
+            for await result in group {
+                responses.append(result)
+            }
+            return responses
+        }
+        
+        #expect(results.compactMap { $0 }.count == clients.count)
+        #expect(receivedCount == clients.count)
+    }
+    
+    @Test("Message ordering preservation")
+    func messageOrderingPreservation() async throws {
+        let transport = InMemoryMessageTransport()
+        
+        // Enqueue messages in order
+        let messageCount = 10
+        for i in 0..<messageCount {
+            let envelope = Envelope.invocation(
+                to: ActorEdgeID("test"),
+                target: "method-\(i)",
+                manifest: SerializationManifest.json(),
+                payload: Data("\(i)".utf8)
+            )
+            await transport.enqueueMessage(envelope)
+        }
+        
+        // Receive and verify order
+        let stream = transport.receive()
+        var receivedOrder: [Int] = []
+        
+        for await envelope in stream {
+            if let data = String(data: envelope.payload, encoding: .utf8),
+               let index = Int(data) {
+                receivedOrder.append(index)
+            }
+            
+            if receivedOrder.count == messageCount {
+                break
+            }
+        }
+        
+        #expect(receivedOrder == Array(0..<messageCount))
+    }
+    
+    @Test("Transport attributes")
+    func transportAttributes() async throws {
+        let transport = InMemoryMessageTransport()
+        
+        // Check default attributes
+        let attrs = transport.metadata.attributes
+        #expect(attrs["paired"] == "false")
+        
+        // Create paired transports
+        let (client, server) = InMemoryMessageTransport.createConnectedPair()
+        #expect(client.metadata.attributes["paired"] == "true")
+        #expect(server.metadata.attributes["paired"] == "true")
+        
+        // Unpair by closing
+        try await client.close()
+        #expect(server.metadata.attributes["paired"] == "false")
     }
 }

@@ -2,11 +2,10 @@ import Testing
 import Foundation
 import Distributed
 import ServiceContextModule
-import GRPCCore
 @testable import ActorEdgeCore
 
 /// Test suite for ActorEdge transport functionality
-@Suite("Transport Tests")
+@Suite("Transport Tests", .tags(.transport, .unit))
 struct TransportTests {
     
     // MARK: - Test Configuration
@@ -23,7 +22,7 @@ struct TransportTests {
     
     @Test("Mock transport remote call")
     func testMockTransportRemoteCall() async throws {
-        let transport = MockTransport()
+        let transport = MockMessageTransport()
         let expectedResponse = Data("response".utf8)
         
         // Create response envelope
@@ -54,7 +53,7 @@ struct TransportTests {
     
     @Test("Mock transport remote call void")
     func testMockTransportRemoteCallVoid() async throws {
-        let transport = MockTransport()
+        let transport = MockMessageTransport()
         
         // Create request envelope for void call
         let requestEnvelope = Envelope.invocation(
@@ -75,7 +74,7 @@ struct TransportTests {
     
     @Test("Mock transport stream receive")
     func testMockTransportStreamReceive() async throws {
-        let transport = MockTransport()
+        let transport = MockMessageTransport()
         let streamData = [Data("chunk1".utf8), Data("chunk2".utf8), Data("chunk3".utf8)]
         
         // Enqueue stream envelopes
@@ -105,7 +104,7 @@ struct TransportTests {
     
     @Test("Mock transport error handling")
     func testMockTransportError() async throws {
-        let transport = MockTransport()
+        let transport = MockMessageTransport()
         transport.shouldThrowError = true
         
         let requestEnvelope = Envelope.invocation(
@@ -127,7 +126,7 @@ struct TransportTests {
     
     @Test("Service context propagation through envelope headers")
     func testServiceContextPropagation() async throws {
-        let transport = MockTransport()
+        let transport = MockMessageTransport()
         
         // Create envelope with context headers
         let requestEnvelope = Envelope.invocation(
@@ -151,7 +150,7 @@ struct TransportTests {
     
     @Test("Transport conforms to MessageTransport protocol")
     func testTransportConformance() async throws {
-        let transport = MockTransport()
+        let transport = MockMessageTransport()
         
         // Test that MockTransport conforms to MessageTransport
         let _: any MessageTransport = transport
@@ -170,7 +169,7 @@ struct TransportTests {
     
     @Test("Transport call performance")
     func testTransportPerformance() async throws {
-        let transport = MockTransport()
+        let transport = MockMessageTransport()
         let responseData = Data("performance test".utf8)
         
         transport.mockResponse = Envelope.response(
@@ -218,98 +217,3 @@ struct TransportTests {
         #expect(decodedError == error)
     }
 }
-
-// MARK: - Mock Transport Implementation
-
-final class MockTransport: MessageTransport, @unchecked Sendable {
-    var mockResponse: Envelope?
-    var shouldThrowError = false
-    var voidCallCount = 0
-    var lastEnvelope: Envelope?
-    private var connected = true
-    private var receiveQueue: [Envelope] = []
-    
-    func send(_ envelope: Envelope) async throws -> Envelope? {
-        if shouldThrowError {
-            throw TransportError.sendFailed(reason: "Mock transport error")
-        }
-        
-        if !connected {
-            throw TransportError.disconnected
-        }
-        
-        lastEnvelope = envelope
-        
-        // Count void calls
-        if envelope.messageType == .invocation && mockResponse == nil {
-            voidCallCount += 1
-            return nil
-        }
-        
-        // Return mock response if set
-        if var response = mockResponse {
-            // Update response to match request call ID
-            response = Envelope(
-                recipient: envelope.sender ?? envelope.recipient,
-                sender: envelope.recipient,
-                manifest: response.manifest,
-                payload: response.payload,
-                metadata: MessageMetadata(
-                    callID: envelope.metadata.callID,
-                    target: response.metadata.target,
-                    headers: response.metadata.headers
-                ),
-                messageType: response.messageType
-            )
-            return response
-        }
-        
-        return nil
-    }
-    
-    func receive() -> AsyncStream<Envelope> {
-        AsyncStream { continuation in
-            for envelope in receiveQueue {
-                continuation.yield(envelope)
-            }
-            
-            // Keep stream open for future messages
-            if connected {
-                // In real implementation, this would wait for new messages
-                // For testing, we just finish after current queue
-                continuation.finish()
-            } else {
-                continuation.finish()
-            }
-        }
-    }
-    
-    func close() async throws {
-        connected = false
-        receiveQueue.removeAll()
-    }
-    
-    var isConnected: Bool {
-        connected
-    }
-    
-    var metadata: TransportMetadata {
-        TransportMetadata(
-            transportType: "mock",
-            attributes: ["test": "true"],
-            endpoint: "mock://test",
-            isSecure: false
-        )
-    }
-    
-    // Test helpers
-    func enqueueReceiveEnvelope(_ envelope: Envelope) {
-        receiveQueue.append(envelope)
-    }
-    
-    func disconnect() {
-        connected = false
-    }
-}
-
-// Test types are imported from TestUtilities.swift

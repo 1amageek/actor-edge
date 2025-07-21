@@ -5,7 +5,7 @@ import ServiceContextModule
 @testable import ActorEdgeCore
 
 /// Test suite for ActorEdgeSystem functionality
-@Suite("ActorEdgeSystem Tests")
+@Suite("ActorEdgeSystem Tests", .tags(.core, .unit))
 struct ActorEdgeSystemTests {
     
     // MARK: - Test Actors
@@ -306,8 +306,6 @@ struct ActorEdgeSystemTests {
         #expect(crossCheck2 == nil)
     }
 }
-
-// MockMessageTransport is imported from TestUtilities.swift
 
 // MARK: - Test Context Key
 
