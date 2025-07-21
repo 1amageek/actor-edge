@@ -7,7 +7,7 @@ import Distributed
 /// Supports both fixed string IDs (e.g., "chat-server") and generated IDs.
 public struct ActorEdgeID: Sendable, Hashable, Codable {
     /// The actor identifier value
-    private let value: String
+    public let value: String
     
     /// Optional metadata for future extensibility
     public let metadata: [String: String]

@@ -110,7 +110,7 @@ final class SerializerRegistry: @unchecked Sendable {
     func getSerializer(id: String) throws -> any MessageSerializer {
         try lock.withLock {
             guard let serializer = serializers[id] else {
-                throw SerializationError.serializerNotFound(id: id)
+                throw ActorEdgeError.serializationFailed("Serializer not found: \(id)")
             }
             return serializer
         }
@@ -134,7 +134,7 @@ struct JSONMessageSerializer: MessageSerializer {
         do {
             return try encoder.encode(value)
         } catch {
-            throw SerializationError.encodingFailed(error: error)
+            throw ActorEdgeError.serializationFailed("Failed to encode: \(error)")
         }
     }
     
@@ -142,19 +142,12 @@ struct JSONMessageSerializer: MessageSerializer {
         do {
             return try decoder.decode(type, from: data)
         } catch {
-            throw SerializationError.decodingFailed(error: error)
+            throw ActorEdgeError.deserializationFailed("Failed to decode: \(error)")
         }
     }
 }
 
-/// Errors that can occur during serialization.
-public enum SerializationError: Error, Sendable {
-    case serializerNotFound(id: String)
-    case encodingFailed(error: Error)
-    case decodingFailed(error: Error)
-    case typeMismatch(expected: String, actual: String)
-    case unsupportedType(String)
-}
+// Error types moved to ActorEdgeError
 
 // MARK: - Extensions for ActorSystem Integration
 
@@ -163,7 +156,7 @@ extension SerializationSystem {
     public func serializeActorReference<Act: DistributedActor>(
         _ actor: Act
     ) throws -> SerializedMessage where Act.ActorSystem == ActorEdgeSystem {
-        let reference = ActorReference(id: actor.id, type: String(reflecting: Act.self))
+        let reference = SerializableActorReference(id: actor.id, type: String(reflecting: Act.self))
         return try serialize(reference)
     }
     
@@ -173,11 +166,11 @@ extension SerializationSystem {
         as actorType: Act.Type,
         using system: ActorEdgeSystem
     ) async throws -> Act where Act.ActorSystem == ActorEdgeSystem {
-        let reference = try deserialize(message, as: ActorReference.self)
+        let reference = try deserialize(message, as: SerializableActorReference.self)
         
         // Resolve the actor using the system
         guard let actor = try system.resolve(id: reference.id, as: actorType) else {
-            throw SerializationError.typeMismatch(
+            throw ActorEdgeError.typeMismatch(
                 expected: String(reflecting: actorType),
                 actual: reference.type
             )
@@ -188,7 +181,7 @@ extension SerializationSystem {
 }
 
 /// Internal representation of an actor reference for serialization.
-private struct ActorReference: Codable {
+private struct SerializableActorReference: Codable {
     let id: ActorEdgeID
     let type: String
 }

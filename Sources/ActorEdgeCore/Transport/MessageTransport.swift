@@ -14,7 +14,7 @@ import Foundation
 
 /// Protocol-independent message transport layer for distributed actor communication.
 ///
-/// This protocol abstracts the underlying transport mechanism (gRPC, WebSocket, TCP, etc.)
+/// This protocol abstracts the underlying transport mechanism (gRPC, TCP, etc.)
 /// and provides a unified interface for sending and receiving actor messages.
 ///
 /// Inspired by swift-distributed-actors' Wire.Envelope pattern, this design enables:
@@ -51,7 +51,7 @@ public protocol MessageTransport: Sendable {
 
 /// Metadata about the transport connection.
 public struct TransportMetadata: Sendable {
-    /// The type of transport (e.g., "grpc", "websocket", "tcp")
+    /// The type of transport (e.g., "grpc", "tcp")
     public let transportType: String
     
     /// Transport-specific attributes

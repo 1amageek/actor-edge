@@ -74,24 +74,25 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
             substitutions = invocationData.genericSubstitutions
         }
         
-        // Optimized for concrete types (most common case)
+        print("🔵 [DECODER] Processing generic substitutions: \(substitutions)")
+        
         if substitutions.isEmpty {
             return []
         }
         
-        // Handle generic type resolution
-        var types: [Any.Type] = []
-        for mangledName in substitutions {
-            if let type = _typeByName(mangledName) {
-                types.append(type)
-            } else {
-                // Log warning and use Any.self as fallback
-                system.log("Cannot resolve generic type '\(mangledName)', using Any.self")
-                types.append(Any.self)
+        // swift-distributed-actorsと同じく、型が見つからない場合はエラーを投げる
+        return try substitutions.map { typeName in
+            guard let type = _typeByName(typeName) else {
+                print("🔴 [DECODER] Failed to resolve type: \(typeName)")
+                throw ActorEdgeError.deserializationFailed(
+                    "Unable to resolve type '\(typeName)' for generic substitution. " +
+                    "Ensure the type is available in the runtime and properly linked."
+                )
             }
+            
+            print("🟢 [DECODER] Successfully resolved: \(typeName) -> \(type)")
+            return type
         }
-        
-        return types
     }
     
     public mutating func decodeNextArgument<Argument>() throws -> Argument 
@@ -193,30 +194,7 @@ private enum DecodingError: Error {
 }
 
 // MARK: - Type Resolution
-
-/// Attempts to resolve a type from its mangled name.
-/// This is a simplified version - production would use swift-demangle.
-private func _typeByName(_ mangledName: String) -> Any.Type? {
-    // Try common built-in types first
-    switch mangledName {
-    case "Swift.String", "String":
-        return String.self
-    case "Swift.Int", "Int":
-        return Int.self
-    case "Swift.Double", "Double":
-        return Double.self
-    case "Swift.Bool", "Bool":
-        return Bool.self
-    case "Swift.Array<Swift.String>":
-        return [String].self
-    case "Swift.Dictionary<Swift.String, Swift.String>":
-        return [String: String].self
-    default:
-        // For now, return nil for unknown types
-        // In production, this would use swift-demangle or a type registry
-        return nil
-    }
-}
+// Using _typeByName from TypeNames.swift which implements swift-distributed-actors compatible resolution
 
 // MARK: - CodingUserInfoKey Extension
 

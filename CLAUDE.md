@@ -22,7 +22,7 @@ swift package clean
 
 ## Architecture Overview
 
-ActorEdge is a protocol-independent distributed actor framework that enables declarative server definitions using Swift's distributed actors. It leverages SE-0428's `@Resolvable` macro to provide type-safe client stubs without requiring clients to know server implementations. The framework follows Swift Distributed's design principles by abstracting the transport layer, allowing for gRPC, WebSocket, TCP, or any other protocol implementation.
+ActorEdge is a protocol-independent distributed actor framework that enables declarative server definitions using Swift's distributed actors. It leverages SE-0428's `@Resolvable` macro to provide type-safe client stubs without requiring clients to know server implementations. The framework follows Swift Distributed's design principles by abstracting the transport layer, allowing for gRPC, TCP, or any other protocol implementation.
 
 ### @Resolvable Macro (SE-0428)
 
@@ -113,7 +113,7 @@ public distributed actor ChatServerActor: Chat {
 }
 
 // Client module - uses auto-generated $Chat stub
-// Protocol-independent: can use gRPC, WebSocket, or any transport
+// Protocol-independent: can use gRPC or any transport
 let system = try await ActorEdgeSystem.grpcClient(endpoint: "127.0.0.1:8000")
 let chat = try $Chat.resolve(id: ActorEdgeID(), using: system)
 try await chat.send("Hello")
@@ -177,13 +177,12 @@ The `main()` function is provided by a Server extension that reads these configu
 
 **MessageTransport Protocol**
 - Abstract interface for any transport implementation
-- Supports gRPC, WebSocket, TCP, UDP, or custom protocols
+- Supports gRPC, TCP, UDP, or custom protocols
 - Handles envelope sending/receiving
 - Enables testability with in-memory implementations
 
 **Transport Implementations**
 - `GRPCMessageTransport`: gRPC Swift 2.0 implementation
-- `WebSocketMessageTransport`: WebSocket support (future)
 - `InMemoryMessageTransport`: Testing and local development
 
 **Server Protocol Extension**
@@ -221,7 +220,6 @@ Sources/
 │   │   └── ServerMiddleware.swift
 │   ├── Transports/         # Transport implementations
 │   │   ├── GRPCMessageTransport.swift
-│   │   ├── WebSocketMessageTransport.swift
 │   │   └── InMemoryMessageTransport.swift
 │   ├── Configuration/
 │   │   ├── MetricsConfiguration.swift
@@ -302,9 +300,6 @@ public final class ActorEdgeSystem: DistributedActorSystem {
 // gRPC transport
 let system = try await ActorEdgeSystem.grpcClient(endpoint: "server:8000")
 
-// WebSocket transport (future)
-let system = try await ActorEdgeSystem.webSocketClient(url: wsURL)
-
 // Custom transport
 let transport = MyCustomTransport()
 let system = ActorEdgeSystem.client(transport: transport)
@@ -329,21 +324,6 @@ message RemoteCallRequest {
 }
 ```
 
-**WebSocket Transport Mapping**
-```swift
-// WebSocket sends JSON-encoded envelopes
-{
-  "recipient": "base64-actor-id",
-  "manifest": {
-    "serializerID": "json",
-    "version": "1.0"
-  },
-  "payload": "base64-encoded-data",
-  "metadata": {
-    "target": "method-identifier"
-  }
-}
-```
 
 ### Implementation Status
 

@@ -41,26 +41,6 @@ public extension ActorEdgeSystem {
         return ActorEdgeSystem(transport: transport, metricsNamespace: metricsNamespace)
     }
     
-    // MARK: - WebSocket Transport (Future)
-    
-    /// Creates a client system with WebSocket transport.
-    ///
-    /// - Parameters:
-    ///   - url: The WebSocket URL
-    ///   - headers: Optional HTTP headers for the WebSocket handshake
-    ///   - metricsNamespace: Namespace for metrics collection
-    /// - Returns: A configured ActorEdgeSystem with WebSocket transport
-    @available(*, unavailable, message: "WebSocket transport not yet implemented")
-    static func webSocketClient(
-        url: URL,
-        headers: [String: String] = [:],
-        metricsNamespace: String = "actor_edge"
-    ) async throws -> ActorEdgeSystem {
-        fatalError("WebSocket transport not yet implemented")
-        // Future implementation:
-        // let transport = try await WebSocketMessageTransport(url: url, headers: headers)
-        // return ActorEdgeSystem(transport: transport, metricsNamespace: metricsNamespace)
-    }
     
     // MARK: - In-Memory Transport
     
@@ -122,8 +102,6 @@ public extension ActorEdgeSystem {
     ///
     /// Supported schemes:
     /// - `grpc://` or `grpcs://` for gRPC transport
-    /// - `ws://` or `wss://` for WebSocket transport (future)
-    /// - `tcp://` for raw TCP transport (future)
     ///
     /// - Parameters:
     ///   - url: The server URL with scheme
@@ -150,15 +128,9 @@ public extension ActorEdgeSystem {
                 metricsNamespace: options.metricsNamespace
             )
             
-        case "ws", "wss":
-            throw TransportError.protocolMismatch(
-                expected: "supported protocol",
-                actual: "WebSocket (not yet implemented)"
-            )
-            
         default:
             throw TransportError.protocolMismatch(
-                expected: "grpc, grpcs, ws, or wss",
+                expected: "grpc or grpcs",
                 actual: scheme
             )
         }

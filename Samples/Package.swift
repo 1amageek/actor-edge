@@ -13,10 +13,6 @@ let package = Package(
     ],
     products: [
         .executable(
-            name: "SampleChat",
-            targets: ["SampleChat"]
-        ),
-        .executable(
             name: "SampleChatServer",
             targets: ["SampleChatServer"]
         ),
@@ -34,6 +30,10 @@ let package = Package(
             name: "SampleChatShared",
             dependencies: [
                 .product(name: "ActorEdge", package: "actor-edge")
+            ],
+            swiftSettings: [
+                .unsafeFlags(["-Onone"]), // Disable optimization for better type retention
+                .define("DEBUG")
             ]
         ),
         
@@ -43,6 +43,10 @@ let package = Package(
             dependencies: [
                 "SampleChatShared",
                 .product(name: "ActorEdgeServer", package: "actor-edge")
+            ],
+            swiftSettings: [
+                .unsafeFlags(["-Onone"]), // Disable optimization for better type retention
+                .define("DEBUG")
             ]
         ),
         
@@ -52,15 +56,10 @@ let package = Package(
             dependencies: [
                 "SampleChatShared",
                 .product(name: "ActorEdgeClient", package: "actor-edge")
-            ]
-        ),
-        
-        // Combined chat sample (for simplicity)
-        .executableTarget(
-            name: "SampleChat",
-            dependencies: [
-                "SampleChatShared",
-                .product(name: "ActorEdge", package: "actor-edge")
+            ],
+            swiftSettings: [
+                .unsafeFlags(["-Onone"]), // Disable optimization for better type retention
+                .define("DEBUG")
             ]
         ),
         

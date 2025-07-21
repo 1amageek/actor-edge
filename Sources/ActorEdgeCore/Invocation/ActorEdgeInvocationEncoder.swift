@@ -58,11 +58,16 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
     
     public mutating func recordGenericSubstitution<T>(_ type: T.Type) throws {
         guard state == .recording else {
-            throw EncodingError.invalidState("Cannot record generic substitution after doneRecording()")
+            throw ActorEdgeError.invocationError("Cannot record generic substitution after doneRecording()")
         }
         
-        // Use mangled type name for accurate type reconstruction
-        let mangledName = String(reflecting: type)
+        // swift-distributed-actorsと同じアプローチ
+        let mangledName = _mangledTypeName(type) ?? String(reflecting: type)
+        
+        print("🟡 [ENCODER] Recording generic substitution:")
+        print("    Type: \(T.self)")
+        print("    Mangled name: \(mangledName)")
+        
         genericSubstitutions.append(mangledName)
     }
     
@@ -70,7 +75,7 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
         _ argument: RemoteCallArgument<Argument>
     ) throws where Argument: SerializationRequirement {
         guard state == .recording else {
-            throw EncodingError.invalidState("Cannot record argument after doneRecording()")
+            throw ActorEdgeError.invocationError("Cannot record argument after doneRecording()")
         }
         
         // Serialize using the new SerializationSystem
@@ -87,7 +92,7 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
         _ returnType: R.Type
     ) throws where R: SerializationRequirement {
         guard state == .recording else {
-            throw EncodingError.invalidState("Cannot record return type after doneRecording()")
+            throw ActorEdgeError.invocationError("Cannot record return type after doneRecording()")
         }
         
         // Check if void return
@@ -97,7 +102,7 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
     
     public mutating func recordErrorType<E: Error>(_ errorType: E.Type) throws {
         guard state == .recording else {
-            throw EncodingError.invalidState("Cannot record error type after doneRecording()")
+            throw ActorEdgeError.invocationError("Cannot record error type after doneRecording()")
         }
         
         // Mark as throwing method
@@ -107,7 +112,7 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
     
     public mutating func doneRecording() throws {
         guard state == .recording else {
-            throw EncodingError.invalidState("Already completed recording")
+            throw ActorEdgeError.invocationError("Already completed recording")
         }
         
         state = .completed
@@ -119,7 +124,7 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
     /// This method is called by DistributedInvocationProcessor.
     internal func finalizeInvocation() throws -> InvocationData {
         guard state == .completed else {
-            throw EncodingError.invalidState("Must call doneRecording() before finalizing")
+            throw ActorEdgeError.invocationError("Must call doneRecording() before finalizing")
         }
         
         // Extract data and manifests from SerializedArgument array
@@ -143,7 +148,4 @@ internal enum EncodingState {
     case completed
 }
 
-/// Encoding-specific errors
-private enum EncodingError: Error {
-    case invalidState(String)
-}
+// Errors moved to ActorEdgeError

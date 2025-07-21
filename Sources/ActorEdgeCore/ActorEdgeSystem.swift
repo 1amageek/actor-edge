@@ -19,7 +19,7 @@ import Metrics
 /// The distributed actor system implementation for ActorEdge.
 ///
 /// This system provides a protocol-independent distributed actor runtime
-/// that can work with any transport layer (gRPC, WebSocket, TCP, etc.).
+/// that can work with any transport layer (gRPC, TCP, etc.).
 public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
     public typealias ActorID = ActorEdgeID
     public typealias SerializationRequirement = Codable & Sendable

@@ -72,6 +72,9 @@ let package = Package(
             resources: [
                 .process("swift-protobuf-config.json")
             ],
+            swiftSettings: [
+                .define("DEBUG", .when(configuration: .debug))
+            ],
             plugins: [
                 .plugin(name: "SwiftProtobufPlugin", package: "swift-protobuf")
             ]

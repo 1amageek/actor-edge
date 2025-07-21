@@ -19,6 +19,8 @@ public enum ActorEdgeError: Error, Codable, Sendable {
     case invalidEnvelope(String)
     case connectionRejected(reason: String)
     case protocolMismatch(String)
+    case typeMismatch(expected: String, actual: String)
+    case typeNotFound(String)
     
     private enum CodingKeys: String, CodingKey {
         case type
@@ -85,6 +87,13 @@ public enum ActorEdgeError: Error, Codable, Sendable {
         case "protocolMismatch":
             let message = try container.decode(String.self, forKey: .message)
             self = .protocolMismatch(message)
+        case "typeMismatch":
+            let expectedType = try container.decode(String.self, forKey: .expectedType)
+            let actualType = try container.decode(String.self, forKey: .actualType)
+            self = .typeMismatch(expected: expectedType, actual: actualType)
+        case "typeNotFound":
+            let message = try container.decode(String.self, forKey: .message)
+            self = .typeNotFound(message)
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .type,
@@ -146,6 +155,13 @@ public enum ActorEdgeError: Error, Codable, Sendable {
             try container.encode(reason, forKey: .reason)
         case .protocolMismatch(let message):
             try container.encode("protocolMismatch", forKey: .type)
+            try container.encode(message, forKey: .message)
+        case .typeMismatch(let expectedType, let actualType):
+            try container.encode("typeMismatch", forKey: .type)
+            try container.encode(expectedType, forKey: .expectedType)
+            try container.encode(actualType, forKey: .actualType)
+        case .typeNotFound(let message):
+            try container.encode("typeNotFound", forKey: .type)
             try container.encode(message, forKey: .message)
         }
     }

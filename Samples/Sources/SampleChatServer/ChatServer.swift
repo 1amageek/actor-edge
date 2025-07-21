@@ -71,6 +71,9 @@ struct ChatServer: Server {
   
     @ActorBuilder
     func actors(actorSystem: ActorEdgeSystem) -> [any DistributedActor] {
-        ChatActor(actorSystem: actorSystem)
+        // Debug type resolution
+        ChatDebug.printTypeInfo()
+        
+        return [ChatActor(actorSystem: actorSystem)]
     }
 }
