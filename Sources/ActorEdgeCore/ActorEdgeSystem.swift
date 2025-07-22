@@ -27,11 +27,49 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
     public typealias InvocationDecoder = ActorEdgeInvocationDecoder
     public typealias ResultHandler = ActorEdgeResultHandler
     
+    /// Configuration for ActorEdgeSystem
+    public struct Configuration: Sendable {
+        /// Metrics configuration
+        public let metrics: MetricsConfiguration
+        
+        /// Tracing configuration
+        public let tracing: TracingConfiguration
+        
+        /// Request timeout
+        public let timeout: TimeInterval
+        
+        /// Maximum retry attempts
+        public let maxRetries: Int
+        
+        /// Logger label
+        public let loggerLabel: String
+        
+        public init(
+            metrics: MetricsConfiguration = .default,
+            tracing: TracingConfiguration = .disabled,
+            timeout: TimeInterval = 30,
+            maxRetries: Int = 3,
+            loggerLabel: String = "ActorEdge.System"
+        ) {
+            self.metrics = metrics
+            self.tracing = tracing
+            self.timeout = timeout
+            self.maxRetries = maxRetries
+            self.loggerLabel = loggerLabel
+        }
+        
+        /// Default configuration
+        public static let `default` = Configuration()
+    }
+    
     /// Protocol-independent transport layer
     private let transport: MessageTransport?
     
     /// Invocation processor for envelope handling
     private let invocationProcessor: DistributedInvocationProcessor
+    
+    /// System configuration
+    private let configuration: Configuration
     
     private let logger: Logger
     public let isServer: Bool
@@ -49,15 +87,16 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
     private let metricNames: MetricNames
     
     /// Create a client-side actor system with a transport
-    public init(transport: MessageTransport, metricsNamespace: String = "actor_edge") {
+    public init(transport: MessageTransport, configuration: Configuration = .default) {
         self.transport = transport
-        self.logger = Logger(label: "ActorEdge.System")
+        self.configuration = configuration
+        self.logger = Logger(label: configuration.loggerLabel)
         self.isServer = false
         self.registry = ActorRegistry() // Clients can also have local actors
         self.serialization = SerializationSystem()
         
         // Initialize metrics first
-        self.metricNames = MetricNames(namespace: metricsNamespace)
+        self.metricNames = MetricNames(namespace: configuration.metrics.namespace)
         self.distributedCallsCounter = Counter(label: metricNames.distributedCallsTotal)
         self.methodInvocationsCounter = Counter(label: metricNames.methodInvocationsTotal)
         
@@ -66,15 +105,16 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
     }
     
     /// Create a server-side actor system without transport
-    public init(metricsNamespace: String = "actor_edge") {
+    public init(configuration: Configuration = .default) {
         self.transport = nil
-        self.logger = Logger(label: "ActorEdge.System")
+        self.configuration = configuration
+        self.logger = Logger(label: configuration.loggerLabel)
         self.isServer = true
         self.registry = ActorRegistry()
         self.serialization = SerializationSystem()
         
         // Initialize metrics first
-        self.metricNames = MetricNames(namespace: metricsNamespace)
+        self.metricNames = MetricNames(namespace: configuration.metrics.namespace)
         self.distributedCallsCounter = Counter(label: metricNames.distributedCallsTotal)
         self.methodInvocationsCounter = Counter(label: metricNames.methodInvocationsTotal)
         

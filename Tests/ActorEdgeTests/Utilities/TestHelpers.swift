@@ -10,14 +10,23 @@ public struct TestHelpers {
     
     /// Create a test actor system
     public static func makeTestActorSystem(namespace: String = "test") -> ActorEdgeSystem {
-        ActorEdgeSystem(metricsNamespace: namespace)
+        let configuration = ActorEdgeSystem.Configuration(
+            metrics: .init(namespace: namespace)
+        )
+        return ActorEdgeSystem(configuration: configuration)
     }
     
     /// Create connected client-server pair
     public static func makeConnectedPair() -> (client: ActorEdgeSystem, server: ActorEdgeSystem) {
         let (clientTransport, serverTransport) = InMemoryMessageTransport.createConnectedPair()
-        let client = ActorEdgeSystem(transport: clientTransport, metricsNamespace: "test_client")
-        let server = ActorEdgeSystem(metricsNamespace: "test_server")
+        let clientConfig = ActorEdgeSystem.Configuration(
+            metrics: .init(namespace: "test_client")
+        )
+        let serverConfig = ActorEdgeSystem.Configuration(
+            metrics: .init(namespace: "test_server")
+        )
+        let client = ActorEdgeSystem(transport: clientTransport, configuration: clientConfig)
+        let server = ActorEdgeSystem(configuration: serverConfig)
         
         // Set up server to handle messages with full distributed actor processing
         Task {

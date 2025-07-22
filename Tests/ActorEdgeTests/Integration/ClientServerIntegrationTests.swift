@@ -204,14 +204,14 @@ struct ClientServerIntegrationTests {
     @Test("Transport failure recovery")
     func transportFailureRecovery() async throws {
         let mockTransport = MockMessageTransport()
-        let system = ActorEdgeSystem(transport: mockTransport, metricsNamespace: "test")
+        let system = ActorEdgeSystem(transport: mockTransport, configuration: .init(metrics: .init(namespace: "test")))
         
         system.setPreAssignedIDs(["test-actor"])
         let actor = TestActorImpl(actorSystem: system)
         
         // Create a remote reference through a client system
         let clientTransport = MockMessageTransport()
-        let clientSystem = ActorEdgeSystem(transport: clientTransport, metricsNamespace: "client")
+        let clientSystem = ActorEdgeSystem(transport: clientTransport, configuration: .init(metrics: .init(namespace: "client")))
         
         // Set up transport to fail initially
         clientTransport.shouldThrowError = true
@@ -250,7 +250,7 @@ struct ClientServerIntegrationTests {
         ComplexMessage._forceTypeRetention()
         
         // Create server with multiple actors
-        let serverSystem = ActorEdgeSystem(metricsNamespace: "multi_actor_server")
+        let serverSystem = ActorEdgeSystem(configuration: .init(metrics: .init(namespace: "multi_actor_server")))
         serverSystem.setPreAssignedIDs(["actor1", "actor2", "actor3"])
         
         let actor1 = TestActorImpl(actorSystem: serverSystem)
@@ -303,7 +303,7 @@ struct ClientServerIntegrationTests {
     @Test("Actor lifecycle and cleanup")
     func actorLifecycleAndCleanup() async throws {
         // Test actor creation, usage, and cleanup
-        let serverSystem = ActorEdgeSystem(metricsNamespace: "lifecycle_server")
+        let serverSystem = ActorEdgeSystem(configuration: .init(metrics: .init(namespace: "lifecycle_server")))
         let actorID = ActorEdgeID("lifecycle-actor")
         serverSystem.setPreAssignedIDs([actorID.value])
         

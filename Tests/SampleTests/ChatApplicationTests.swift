@@ -14,14 +14,14 @@ struct ChatApplicationTests {
         Message._forceTypeRetention()
         
         // Create server
-        let serverSystem = ActorEdgeSystem(metricsNamespace: "chat_server")
+        let serverSystem = ActorEdgeSystem(configuration: .init(metrics: .init(namespace: "chat_server")))
         serverSystem.setPreAssignedIDs(["chat-server"])
         
         let chatActor = ChatActor(actorSystem: serverSystem)
         
         // Create client connection
         let (clientTransport, serverTransport) = InMemoryMessageTransport.createConnectedPair()
-        let clientSystem = ActorEdgeSystem(transport: clientTransport, metricsNamespace: "chat_client")
+        let clientSystem = ActorEdgeSystem(transport: clientTransport, configuration: .init(metrics: .init(namespace: "chat_client")))
         
         // Set up server transport to handle chat messages
         serverTransport.setMessageHandler { envelope in
@@ -123,7 +123,7 @@ struct ChatApplicationTests {
         Message._forceTypeRetention()
         
         // Create server
-        let serverSystem = ActorEdgeSystem(metricsNamespace: "multi_user_chat")
+        let serverSystem = ActorEdgeSystem(configuration: .init(metrics: .init(namespace: "multi_user_chat")))
         serverSystem.setPreAssignedIDs(["chat-room"])
         
         let chatActor = ChatActor(actorSystem: serverSystem)
@@ -132,8 +132,8 @@ struct ChatApplicationTests {
         let (clientTransport1, serverTransport1) = InMemoryMessageTransport.createConnectedPair()
         let (clientTransport2, serverTransport2) = InMemoryMessageTransport.createConnectedPair()
         
-        let clientSystem1 = ActorEdgeSystem(transport: clientTransport1, metricsNamespace: "client1")
-        let clientSystem2 = ActorEdgeSystem(transport: clientTransport2, metricsNamespace: "client2")
+        let clientSystem1 = ActorEdgeSystem(transport: clientTransport1, configuration: .init(metrics: .init(namespace: "client1")))
+        let clientSystem2 = ActorEdgeSystem(transport: clientTransport2, configuration: .init(metrics: .init(namespace: "client2")))
         
         // Set up server transports
         for transport in [serverTransport1, serverTransport2] {

@@ -66,7 +66,13 @@ public actor ActorEdgeService: Service {
         )
         
         // Create actor system (server-side doesn't need transport for local actors)
-        let system = ActorEdgeSystem(metricsNamespace: configuration.server.metrics.namespace)
+        let systemConfig = ActorEdgeSystem.Configuration(
+            metrics: configuration.server.metrics,
+            tracing: configuration.server.tracing,
+            timeout: configuration.server.timeout,
+            maxRetries: configuration.server.maxRetries
+        )
+        let system = ActorEdgeSystem(configuration: systemConfig)
         actorSystem = system
         
         // Set pre-assigned IDs before creating actors

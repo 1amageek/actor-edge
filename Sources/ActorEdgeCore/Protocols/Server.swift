@@ -95,6 +95,9 @@ public protocol Server: Sendable {
     /// Request timeout duration
     var timeout: TimeInterval { get }
     
+    /// Maximum retry attempts
+    var maxRetries: Int { get }
+    
     /// Metrics collection configuration
     var metrics: MetricsConfiguration { get }
     
@@ -116,6 +119,7 @@ public extension Server {
     var middleware: [any ServerMiddleware] { [] }
     var maxConnections: Int { 1000 }
     var timeout: TimeInterval { 30 }
+    var maxRetries: Int { 3 }
     var metrics: MetricsConfiguration { .default }
     var tracing: TracingConfiguration { .default }
 }

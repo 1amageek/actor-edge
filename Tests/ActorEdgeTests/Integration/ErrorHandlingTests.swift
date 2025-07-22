@@ -433,7 +433,7 @@ struct ErrorHandlingTests {
     @Test("Transport-level error handling")
     func transportLevelErrorHandling() async throws {
         let mockTransport = MockMessageTransport()
-        let system = ActorEdgeSystem(transport: mockTransport, metricsNamespace: "error-test")
+        let system = ActorEdgeSystem(transport: mockTransport, configuration: .init(metrics: .init(namespace: "error-test")))
         
         system.setPreAssignedIDs(["transport-error-actor"])
         let actor = ErrorHandlingActorImpl(actorSystem: system)
@@ -447,7 +447,7 @@ struct ErrorHandlingTests {
         clientTransport.shouldThrowError = true
         clientTransport.errorToThrow = TransportError.connectionFailed(reason: "Network unreachable")
         
-        let clientSystem = ActorEdgeSystem(transport: clientTransport, metricsNamespace: "error-client")
+        let clientSystem = ActorEdgeSystem(transport: clientTransport, configuration: .init(metrics: .init(namespace: "error-client")))
         let remoteActor = try $ErrorHandlingActor.resolve(id: actor.id, using: clientSystem)
         
         // Should get transport error

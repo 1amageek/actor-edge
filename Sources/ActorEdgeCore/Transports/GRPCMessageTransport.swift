@@ -39,13 +39,13 @@ public final class GRPCMessageTransport: MessageTransport, Sendable {
     private let metricNames: TransportMetricNames
     
     /// Creates a new gRPC message transport.
-    public init(endpoint: String, tls: ClientTLSConfiguration? = nil, metricsNamespace: String = "actor_edge") async throws {
+    public init(endpoint: String, tls: ClientTLSConfiguration? = nil, configuration: ActorEdgeSystem.Configuration = .default) async throws {
         self.endpoint = endpoint
         self.logger = Logger(label: "ActorEdge.Transport.gRPC")
         self.eventLoopGroup = MultiThreadedEventLoopGroup(numberOfThreads: System.coreCount)
         
         // Initialize metrics
-        self.metricNames = TransportMetricNames(namespace: metricsNamespace)
+        self.metricNames = TransportMetricNames(namespace: configuration.metrics.namespace)
         self.requestCounter = Counter(label: metricNames.messagesEnvelopesSentTotal)
         self.errorCounter = Counter(label: metricNames.messagesEnvelopesErrorsTotal)
         

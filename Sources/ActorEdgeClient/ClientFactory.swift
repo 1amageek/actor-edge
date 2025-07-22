@@ -26,19 +26,19 @@ public extension ActorEdgeSystem {
     /// - Parameters:
     ///   - endpoint: The server endpoint in "host:port" format
     ///   - tls: Optional TLS configuration for secure connections
-    ///   - metricsNamespace: Namespace for metrics collection
+    ///   - configuration: System configuration including metrics, tracing, etc.
     /// - Returns: A configured ActorEdgeSystem with gRPC transport
     static func grpcClient(
         endpoint: String,
         tls: ClientTLSConfiguration? = nil,
-        metricsNamespace: String = "actor_edge"
+        configuration: Configuration = .default
     ) async throws -> ActorEdgeSystem {
         let transport = try await GRPCMessageTransport(
             endpoint: endpoint,
             tls: tls,
-            metricsNamespace: metricsNamespace
+            configuration: configuration
         )
-        return ActorEdgeSystem(transport: transport, metricsNamespace: metricsNamespace)
+        return ActorEdgeSystem(transport: transport, configuration: configuration)
     }
     
     
@@ -47,27 +47,27 @@ public extension ActorEdgeSystem {
     /// Creates a client system with in-memory transport for testing.
     ///
     /// - Parameters:
-    ///   - metricsNamespace: Namespace for metrics collection
+    ///   - configuration: System configuration including metrics, tracing, etc.
     /// - Returns: A tuple containing the client system and its transport
     static func inMemoryClient(
-        metricsNamespace: String = "actor_edge"
+        configuration: Configuration = .default
     ) -> (system: ActorEdgeSystem, transport: InMemoryMessageTransport) {
         let transport = InMemoryMessageTransport()
-        let system = ActorEdgeSystem(transport: transport, metricsNamespace: metricsNamespace)
+        let system = ActorEdgeSystem(transport: transport, configuration: configuration)
         return (system, transport)
     }
     
     /// Creates a pair of connected client and server systems for testing.
     ///
-    /// - Parameter metricsNamespace: Namespace for metrics collection
+    /// - Parameter configuration: System configuration including metrics, tracing, etc.
     /// - Returns: A tuple containing connected client and server systems
     static func createConnectedPair(
-        metricsNamespace: String = "actor_edge"
+        configuration: Configuration = .default
     ) -> (client: ActorEdgeSystem, server: ActorEdgeSystem) {
         let (clientTransport, serverTransport) = InMemoryMessageTransport.createConnectedPair()
         
-        let client = ActorEdgeSystem(transport: clientTransport, metricsNamespace: metricsNamespace)
-        let server = ActorEdgeSystem(metricsNamespace: metricsNamespace)
+        let client = ActorEdgeSystem(transport: clientTransport, configuration: configuration)
+        let server = ActorEdgeSystem(configuration: configuration)
         
         // Set up server transport to handle invocations
         serverTransport.setMessageHandler { envelope in
@@ -85,13 +85,13 @@ public extension ActorEdgeSystem {
     ///
     /// - Parameters:
     ///   - transport: The custom transport implementation
-    ///   - metricsNamespace: Namespace for metrics collection
+    ///   - configuration: System configuration including metrics, tracing, etc.
     /// - Returns: A configured ActorEdgeSystem with the custom transport
     static func client(
         transport: MessageTransport,
-        metricsNamespace: String = "actor_edge"
+        configuration: Configuration = .default
     ) -> ActorEdgeSystem {
-        return ActorEdgeSystem(transport: transport, metricsNamespace: metricsNamespace)
+        return ActorEdgeSystem(transport: transport, configuration: configuration)
     }
 }
 
@@ -105,11 +105,11 @@ public extension ActorEdgeSystem {
     ///
     /// - Parameters:
     ///   - url: The server URL with scheme
-    ///   - options: Connection options
+    ///   - configuration: System configuration including metrics, tracing, etc.
     /// - Returns: A configured ActorEdgeSystem
     static func connect(
         to url: URL,
-        options: ConnectionOptions = .defaults
+        configuration: Configuration = .default
     ) async throws -> ActorEdgeSystem {
         guard let scheme = url.scheme?.lowercased() else {
             throw TransportError.protocolMismatch(
@@ -125,7 +125,7 @@ public extension ActorEdgeSystem {
             return try await grpcClient(
                 endpoint: endpoint,
                 tls: tls,
-                metricsNamespace: options.metricsNamespace
+                configuration: configuration
             )
             
         default:
@@ -137,32 +137,3 @@ public extension ActorEdgeSystem {
     }
 }
 
-/// Options for establishing connections.
-public struct ConnectionOptions: Sendable {
-    /// Namespace for metrics collection
-    public let metricsNamespace: String
-    
-    /// Request timeout
-    public let timeout: TimeInterval
-    
-    /// Maximum retry attempts
-    public let maxRetries: Int
-    
-    /// Custom headers
-    public let headers: [String: String]
-    
-    public init(
-        metricsNamespace: String = "actor_edge",
-        timeout: TimeInterval = 30,
-        maxRetries: Int = 3,
-        headers: [String: String] = [:]
-    ) {
-        self.metricsNamespace = metricsNamespace
-        self.timeout = timeout
-        self.maxRetries = maxRetries
-        self.headers = headers
-    }
-    
-    /// Default connection options
-    public static let defaults = ConnectionOptions()
-}
