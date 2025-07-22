@@ -147,20 +147,8 @@ public final class InMemoryMessageTransport: MessageTransport, @unchecked Sendab
     }
     
     private func waitForResponse(callID: String) async -> Envelope? {
-        // Simple polling implementation
-        // In production, this would use AsyncStream or continuations
-        let maxAttempts = 100
-        for _ in 0..<maxAttempts {
-            if let response = await queue.findAndRemove(where: { envelope in
-                envelope.metadata.callID == callID && 
-                (envelope.messageType == .response || envelope.messageType == .error)
-            }) {
-                return response
-            }
-            // Small delay between polls
-            try? await Task.sleep(nanoseconds: 10_000_000) // 10ms
-        }
-        return nil
+        // Use continuation-based approach for better performance
+        return await queue.waitForResponse(callID: callID)
     }
 }
 
@@ -168,10 +156,19 @@ public final class InMemoryMessageTransport: MessageTransport, @unchecked Sendab
 private actor MessageQueue {
     private var messages: [Envelope] = []
     private var waitingContinuations: [CheckedContinuation<Envelope?, Never>] = []
+    private var responseWaiters: [String: CheckedContinuation<Envelope?, Never>] = [:]
     private var isClosed = false
     
     func enqueue(_ envelope: Envelope) {
         guard !isClosed else { return }
+        
+        // Check if this is a response that someone is waiting for
+        let callID = envelope.metadata.callID
+        if (envelope.messageType == .response || envelope.messageType == .error),
+           let waiter = responseWaiters.removeValue(forKey: callID) {
+            waiter.resume(returning: envelope)
+            return
+        }
         
         // If someone is waiting, deliver immediately
         if !waitingContinuations.isEmpty {
@@ -222,6 +219,32 @@ private actor MessageQueue {
             continuation.resume(returning: nil)
         }
         waitingContinuations.removeAll()
+        
+        // Resume all response waiters with nil
+        for (_, waiter) in responseWaiters {
+            waiter.resume(returning: nil)
+        }
+        responseWaiters.removeAll()
+    }
+    
+    func waitForResponse(callID: String) async -> Envelope? {
+        // Check if response is already in the queue
+        if let index = messages.firstIndex(where: { envelope in
+            envelope.metadata.callID == callID &&
+            (envelope.messageType == .response || envelope.messageType == .error)
+        }) {
+            return messages.remove(at: index)
+        }
+        
+        // If closed, return nil
+        if isClosed {
+            return nil
+        }
+        
+        // Wait for response
+        return await withCheckedContinuation { continuation in
+            responseWaiters[callID] = continuation
+        }
     }
 }
 
