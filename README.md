@@ -13,7 +13,7 @@ ActorEdge brings the simplicity of Swift's distributed actors to client-server d
 - **Swift Concurrency**: Native async/await and AsyncStream support
 - **Transparent Errors**: Remote errors propagate naturally as if they were local
 - **Declarative Servers**: SwiftUI-style server configuration with `@ActorBuilder`
-- **Fast by Default**: Binary serialization and HTTP/2 transport
+- **Protocol Independent**: Support for gRPC or custom transports via MessageTransport protocol
 - **Production Ready**: Comprehensive TLS support with certificate management
 
 ## Requirements
@@ -107,8 +107,7 @@ struct ChatServer: Server {
 import ActorEdge
 
 // That's it! The $Chat stub is auto-generated
-let transport = try await GRPCActorTransport("localhost:9000")
-let system = ActorEdgeSystem(transport: transport)
+let system = try await ActorEdgeSystem.grpcClient(endpoint: "localhost:9000")
 let chat = try $Chat.resolve(id: "chat-server", using: system)
 
 let response = try await chat.send("Hello!")
@@ -159,17 +158,22 @@ struct MyServer: Server {
 
 ## Advanced Features
 
-### Binary Serialization
+### Transport Layer
 
-ActorEdge supports both JSON and binary serialization formats:
+ActorEdge uses a protocol-independent transport layer:
 
 ```swift
-// Use binary format for better performance
-let system = ActorEdgeSystem(
-    transport: GRPCActorTransport(endpoint),
-    encoder: BinaryInvocationEncoder.self,
-    decoder: BinaryInvocationDecoder.self
-)
+// gRPC transport (built-in)
+let system = try await ActorEdgeSystem.grpcClient(endpoint: "server:8000")
+
+// Custom transport implementation
+class MyCustomTransport: MessageTransport {
+    func send(_ envelope: Envelope) async throws { /* ... */ }
+    func receive() -> AsyncStream<Envelope> { /* ... */ }
+    func close() async throws { /* ... */ }
+}
+
+let system = ActorEdgeSystem(transport: MyCustomTransport())
 ```
 
 ### TLS Configuration
@@ -195,22 +199,22 @@ var tls: TLSConfiguration? {
 }
 
 // Client with system CA certificates
-let transport = try await GRPCActorTransport(
-    "api.example.com:443",
+let system = try await ActorEdgeSystem.grpcClient(
+    endpoint: "api.example.com:443",
     tls: .systemDefault()
 )
 
 // Client with custom CA
-let transport = try await GRPCActorTransport(
-    "api.example.com:443",
+let system = try await ActorEdgeSystem.grpcClient(
+    endpoint: "api.example.com:443",
     tls: ClientTLSConfiguration.client(
         trustRoots: .certificates([.file("/path/to/ca.pem", format: .pem)])
     )
 )
 
 // Mutual TLS client
-let transport = try await GRPCActorTransport(
-    "api.example.com:443",
+let system = try await ActorEdgeSystem.grpcClient(
+    endpoint: "api.example.com:443",
     tls: ClientTLSConfiguration.mutualTLS(
         certificateChain: [.file("/path/to/client-cert.pem", format: .pem)],
         privateKey: .file("/path/to/client-key.pem", format: .pem),
@@ -242,31 +246,41 @@ do {
 
 ## Testing
 
-ActorEdge includes comprehensive test utilities:
+ActorEdge includes comprehensive test utilities using Swift Testing framework:
 
 ```swift
-// Use mock transport for testing
-let mockTransport = MockActorTransport()
-let system = ActorEdgeSystem(transport: mockTransport)
+// Use in-memory transport for testing
+let (clientTransport, serverTransport) = InMemoryMessageTransport.createConnectedPair()
+let system = ActorEdgeSystem(transport: clientTransport)
 
-// Configure mock responses
-mockTransport.mockResponse = encodedResponse
+// Or use mock transport with response handlers
+let mockTransport = MockMessageTransport()
+mockTransport.setMessageHandler { envelope in
+    // Return mock response
+}
 ```
 
 Run tests:
 
 ```bash
 swift test
+
+# Run specific test suite
+swift test --filter ActorEdgeSystemTests
+
+# Run tests by tag
+swift test --filter @invocation
 ```
 
 ## Performance
 
 ActorEdge is designed for real-world production use:
 
-- **Binary Protocol**: ~40% smaller payload size compared to JSON
+- **Efficient Serialization**: JSON with optional binary format support
 - **Single Connection**: One HTTP/2 connection handles all actors
 - **Streaming**: Native AsyncStream support for real-time data
 - **Low Latency**: Minimal overhead over raw network calls
+- **Type Resolution**: Optimized runtime type resolution using mangled type names
 
 ## Sample Application
 
