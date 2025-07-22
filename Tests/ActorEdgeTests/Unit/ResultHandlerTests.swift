@@ -1,64 +1,58 @@
 import Testing
 @testable import ActorEdgeCore
 import Distributed
+import Foundation
 
 @Suite("Result Handler Tests", .tags(.invocation))
 struct ResultHandlerTests {
     
     @Test("Handler onReturn with value")
     func handlerOnReturnWithValue() async throws {
-        let system = TestHelpers.makeTestActorSystem()
-        
-        // Create a test continuation
-        let expectation = AsyncExpectation<TestMessage>()
-        
-        let handler = ActorEdgeResultHandler(
-            continuation: expectation.continuation,
-            system: system
-        )
-        
         let testMessage = TestMessage(content: "Success result")
-        try await handler.onReturn(value: testMessage)
         
-        let result = await expectation.value
-        #expect(result.content == testMessage.content)
+        let result: Any = try await withCheckedThrowingContinuation { continuation in
+            let handler = ActorEdgeResultHandler.forLocalReturn(
+                continuation: continuation
+            )
+            
+            Task {
+                try await handler.onReturn(value: testMessage)
+            }
+        }
+        
+        let typedResult = result as! TestMessage
+        #expect(typedResult.content == testMessage.content)
     }
     
     @Test("Handler onReturnVoid")
     func handlerOnReturnVoid() async throws {
-        let system = TestHelpers.makeTestActorSystem()
+        let _: Any = try await withCheckedThrowingContinuation { continuation in
+            let handler = ActorEdgeResultHandler.forLocalReturn(
+                continuation: continuation
+            )
+            
+            Task {
+                try await handler.onReturnVoid()
+            }
+        }
         
-        // Create a void continuation
-        let expectation = AsyncExpectation<Void>()
-        
-        let handler = ActorEdgeResultHandler(
-            voidContinuation: expectation.continuation,
-            system: system
-        )
-        
-        try await handler.onReturnVoid()
-        
-        // Should complete without error
-        _ = await expectation.value
+        // Success if we get here without throwing
     }
     
     @Test("Handler onThrow with error")
     func handlerOnThrowWithError() async throws {
-        let system = TestHelpers.makeTestActorSystem()
-        
-        // Create a test continuation
-        let expectation = AsyncExpectation<TestMessage>()
-        
-        let handler = ActorEdgeResultHandler(
-            continuation: expectation.continuation,
-            system: system
-        )
-        
         let testError = TestError.errorWithMessage("Test error")
-        try await handler.onThrow(error: testError)
         
         do {
-            _ = await expectation.value
+            let _: Any = try await withCheckedThrowingContinuation { continuation in
+                let handler = ActorEdgeResultHandler.forLocalReturn(
+                    continuation: continuation
+                )
+                
+                Task {
+                    try await handler.onThrow(error: testError)
+                }
+            }
             Issue.record("Expected error to be thrown")
         } catch let error as TestError {
             #expect(error == testError)
@@ -68,172 +62,236 @@ struct ResultHandlerTests {
     @Test("Remote handler with response writer")
     func remoteHandlerWithResponseWriter() async throws {
         let system = TestHelpers.makeTestActorSystem()
+        let (clientTransport, serverTransport) = InMemoryMessageTransport.createConnectedPair()
         
-        // Create mock response writer
-        let writer = MockResponseWriter()
+        // Create a mock response writer
+        let writer = InvocationResponseWriter(
+            processor: DistributedInvocationProcessor(
+                serialization: system.serialization
+            ),
+            transport: serverTransport,
+            recipient: ActorEdgeID("test-client"),
+            correlationID: "test-call-123",
+            sender: ActorEdgeID("test-server")
+        )
         
-        let handler = ActorEdgeResultHandler(
-            responseWriter: writer,
-            system: system
+        let handler = ActorEdgeResultHandler.forRemoteCall(
+            system: system,
+            callID: "test-call-123",
+            responseWriter: writer
         )
         
         // Test onReturn
         let testMessage = TestMessage(content: "Remote result")
         try await handler.onReturn(value: testMessage)
         
-        #expect(writer.writtenData != nil)
-        #expect(writer.writtenData?.count ?? 0 > 0)
-        #expect(writer.isSuccess == true)
+        // Verify a response was sent
+        var receivedResponse = false
+        let receiveTask = Task {
+            for await envelope in clientTransport.receive() {
+                if envelope.messageType == .response {
+                    receivedResponse = true
+                    break
+                }
+            }
+        }
+        
+        // Give some time for the response to be received
+        try await Task.sleep(for: .milliseconds(100))
+        receiveTask.cancel()
+        
+        #expect(receivedResponse)
     }
     
     @Test("Remote handler void response")
     func remoteHandlerVoidResponse() async throws {
         let system = TestHelpers.makeTestActorSystem()
+        let (clientTransport, serverTransport) = InMemoryMessageTransport.createConnectedPair()
         
-        let writer = MockResponseWriter()
+        let writer = InvocationResponseWriter(
+            processor: DistributedInvocationProcessor(
+                serialization: system.serialization
+            ),
+            transport: serverTransport,
+            recipient: ActorEdgeID("test-client"),
+            correlationID: "void-call-123",
+            sender: ActorEdgeID("test-server")
+        )
         
-        let handler = ActorEdgeResultHandler(
-            responseWriter: writer,
-            system: system
+        let handler = ActorEdgeResultHandler.forRemoteCall(
+            system: system,
+            callID: "void-call-123",
+            responseWriter: writer
         )
         
         // Test onReturnVoid
         try await handler.onReturnVoid()
         
-        #expect(writer.writtenData != nil)
-        #expect(writer.isSuccess == true)
+        // Verify a void response was sent
+        var receivedVoidResponse = false
+        let receiveTask = Task {
+            for await envelope in clientTransport.receive() {
+                if envelope.messageType == .response {
+                    receivedVoidResponse = true
+                    break
+                }
+            }
+        }
+        
+        try await Task.sleep(for: .milliseconds(100))
+        receiveTask.cancel()
+        
+        #expect(receivedVoidResponse)
     }
     
     @Test("Remote handler error response")
     func remoteHandlerErrorResponse() async throws {
         let system = TestHelpers.makeTestActorSystem()
+        let (clientTransport, serverTransport) = InMemoryMessageTransport.createConnectedPair()
         
-        let writer = MockResponseWriter()
+        let writer = InvocationResponseWriter(
+            processor: DistributedInvocationProcessor(
+                serialization: system.serialization
+            ),
+            transport: serverTransport,
+            recipient: ActorEdgeID("test-client"),
+            correlationID: "error-call-123",
+            sender: ActorEdgeID("test-server")
+        )
         
-        let handler = ActorEdgeResultHandler(
-            responseWriter: writer,
-            system: system
+        let handler = ActorEdgeResultHandler.forRemoteCall(
+            system: system,
+            callID: "error-call-123",
+            responseWriter: writer
         )
         
         // Test onThrow
         let testError = TestError.errorWithCode(500)
         try await handler.onThrow(error: testError)
         
-        #expect(writer.writtenData != nil)
-        #expect(writer.isSuccess == false)
-        #expect(writer.errorType != nil)
+        // Verify an error response was sent
+        var receivedErrorResponse = false
+        let receiveTask = Task {
+            for await envelope in clientTransport.receive() {
+                if envelope.messageType == .error {
+                    receivedErrorResponse = true
+                    break
+                }
+            }
+        }
+        
+        try await Task.sleep(for: .milliseconds(100))
+        receiveTask.cancel()
+        
+        #expect(receivedErrorResponse)
     }
     
     @Test("Handler with complex return types")
     func handlerComplexReturnTypes() async throws {
-        let system = TestHelpers.makeTestActorSystem()
-        
-        let expectation = AsyncExpectation<ComplexTestMessage>()
-        
-        let handler = ActorEdgeResultHandler(
-            continuation: expectation.continuation,
-            system: system
-        )
-        
         let complexMessage = ComplexTestMessage(
             messages: [TestMessage(content: "nested")],
             metadata: ["key": "value"],
             optional: "present"
         )
         
-        try await handler.onReturn(value: complexMessage)
+        let result: Any = try await withCheckedThrowingContinuation { continuation in
+            let handler = ActorEdgeResultHandler.forLocalReturn(
+                continuation: continuation
+            )
+            
+            Task {
+                try await handler.onReturn(value: complexMessage)
+            }
+        }
         
-        let result = await expectation.value
-        #expect(result.messages.count == 1)
-        #expect(result.metadata["key"] == "value")
+        let typedResult = result as! ComplexTestMessage
+        #expect(typedResult.messages.count == 1)
+        #expect(typedResult.metadata["key"] == "value")
     }
     
     @Test("Handler with array return type")
     func handlerArrayReturnType() async throws {
-        let system = TestHelpers.makeTestActorSystem()
-        
-        let expectation = AsyncExpectation<[TestMessage]>()
-        
-        let handler = ActorEdgeResultHandler(
-            continuation: expectation.continuation,
-            system: system
-        )
-        
         let messages = [
             TestMessage(content: "msg1"),
             TestMessage(content: "msg2"),
             TestMessage(content: "msg3")
         ]
         
-        try await handler.onReturn(value: messages)
+        let result: Any = try await withCheckedThrowingContinuation { continuation in
+            let handler = ActorEdgeResultHandler.forLocalReturn(
+                continuation: continuation
+            )
+            
+            Task {
+                try await handler.onReturn(value: messages)
+            }
+        }
         
-        let result = await expectation.value
-        #expect(result.count == 3)
-        #expect(result[0].content == "msg1")
+        let typedResult = result as! [TestMessage]
+        #expect(typedResult.count == 3)
+        #expect(typedResult[0].content == "msg1")
     }
     
     @Test("Handler with dictionary return type")
     func handlerDictionaryReturnType() async throws {
-        let system = TestHelpers.makeTestActorSystem()
-        
-        let expectation = AsyncExpectation<[String: Int]>()
-        
-        let handler = ActorEdgeResultHandler(
-            continuation: expectation.continuation,
-            system: system
-        )
-        
         let dict = ["one": 1, "two": 2, "three": 3]
         
-        try await handler.onReturn(value: dict)
+        let result: Any = try await withCheckedThrowingContinuation { continuation in
+            let handler = ActorEdgeResultHandler.forLocalReturn(
+                continuation: continuation
+            )
+            
+            Task {
+                try await handler.onReturn(value: dict)
+            }
+        }
         
-        let result = await expectation.value
-        #expect(result.count == 3)
-        #expect(result["two"] == 2)
+        let typedResult = result as! [String: Int]
+        #expect(typedResult.count == 3)
+        #expect(typedResult["two"] == 2)
     }
     
     @Test("Handler with optional return type")
     func handlerOptionalReturnType() async throws {
-        let system = TestHelpers.makeTestActorSystem()
-        
         // Test with Some value
-        let someExpectation = AsyncExpectation<String?>()
-        let someHandler = ActorEdgeResultHandler(
-            continuation: someExpectation.continuation,
-            system: system
-        )
-        
-        try await someHandler.onReturn(value: Optional("present"))
-        let someResult = await someExpectation.value
-        #expect(someResult == "present")
+        let someResult: Any = try await withCheckedThrowingContinuation { continuation in
+            let handler = ActorEdgeResultHandler.forLocalReturn(
+                continuation: continuation
+            )
+            
+            Task {
+                try await handler.onReturn(value: Optional("present"))
+            }
+        }
+        let typedSome = someResult as! String?
+        #expect(typedSome == "present")
         
         // Test with None value
-        let noneExpectation = AsyncExpectation<String?>()
-        let noneHandler = ActorEdgeResultHandler(
-            continuation: noneExpectation.continuation,
-            system: system
-        )
-        
-        try await noneHandler.onReturn(value: Optional<String>.none)
-        let noneResult = await noneExpectation.value
-        #expect(noneResult == nil)
+        let noneResult: Any = try await withCheckedThrowingContinuation { continuation in
+            let handler = ActorEdgeResultHandler.forLocalReturn(
+                continuation: continuation
+            )
+            
+            Task {
+                try await handler.onReturn(value: Optional<String>.none)
+            }
+        }
+        let typedNone = noneResult as! String?
+        #expect(typedNone == nil)
     }
     
     @Test("Handler with ActorEdgeError")
     func handlerActorEdgeError() async throws {
-        let system = TestHelpers.makeTestActorSystem()
-        
-        let expectation = AsyncExpectation<TestMessage>()
-        
-        let handler = ActorEdgeResultHandler(
-            continuation: expectation.continuation,
-            system: system
-        )
-        
-        try await handler.onThrow(error: ActorEdgeError.timeout)
-        
         do {
-            _ = await expectation.value
+            let _: Any = try await withCheckedThrowingContinuation { continuation in
+                let handler = ActorEdgeResultHandler.forLocalReturn(
+                    continuation: continuation
+                )
+                
+                Task {
+                    try await handler.onThrow(error: ActorEdgeError.timeout)
+                }
+            }
             Issue.record("Expected ActorEdgeError.timeout")
         } catch ActorEdgeError.timeout {
             // Expected
@@ -245,11 +303,22 @@ struct ResultHandlerTests {
     @Test("Handler serialization for remote response")
     func handlerSerializationForRemoteResponse() async throws {
         let system = TestHelpers.makeTestActorSystem()
+        let (clientTransport, serverTransport) = InMemoryMessageTransport.createConnectedPair()
         
-        let writer = MockResponseWriter()
-        let handler = ActorEdgeResultHandler(
-            responseWriter: writer,
-            system: system
+        let writer = InvocationResponseWriter(
+            processor: DistributedInvocationProcessor(
+                serialization: system.serialization
+            ),
+            transport: serverTransport,
+            recipient: ActorEdgeID("test-client"),
+            correlationID: "complex-call",
+            sender: ActorEdgeID("test-server")
+        )
+        
+        let handler = ActorEdgeResultHandler.forRemoteCall(
+            system: system,
+            callID: "complex-call",
+            responseWriter: writer
         )
         
         // Test with a complex message that needs serialization
@@ -261,131 +330,22 @@ struct ResultHandlerTests {
         
         try await handler.onReturn(value: complexMessage)
         
-        #expect(writer.writtenData != nil)
-        #expect(writer.writtenData?.count ?? 0 > 100) // Complex message should be large
-        #expect(writer.manifest?.serializerID == "json")
-    }
-}
-
-// MARK: - Test Helpers
-
-/// Async expectation helper for testing continuations
-private actor AsyncExpectation<T> {
-    private var result: Result<T, Error>?
-    private var waiters: [CheckedContinuation<T, Error>] = []
-    
-    var continuation: CheckedContinuation<T, Error> {
-        get async {
-            await withCheckedContinuation { continuation in
-                Task {
-                    await self.setContinuation(continuation)
+        // Verify the response was sent with proper serialization
+        var receivedEnvelope: Envelope?
+        let receiveTask = Task {
+            for await envelope in clientTransport.receive() {
+                if envelope.messageType == .response {
+                    receivedEnvelope = envelope
+                    break
                 }
             }
         }
-    }
-    
-    private func setContinuation(_ continuation: CheckedContinuation<T, Error>) {
-        if let result = result {
-            switch result {
-            case .success(let value):
-                continuation.resume(returning: value)
-            case .failure(let error):
-                continuation.resume(throwing: error)
-            }
-        } else {
-            waiters.append(continuation)
-        }
-    }
-    
-    func fulfill(with value: T) {
-        result = .success(value)
-        for waiter in waiters {
-            waiter.resume(returning: value)
-        }
-        waiters.removeAll()
-    }
-    
-    func reject(with error: Error) {
-        result = .failure(error)
-        for waiter in waiters {
-            waiter.resume(throwing: error)
-        }
-        waiters.removeAll()
-    }
-    
-    var value: T {
-        get async throws {
-            try await withCheckedThrowingContinuation { continuation in
-                Task {
-                    await self.getValue(continuation: continuation)
-                }
-            }
-        }
-    }
-    
-    private func getValue(continuation: CheckedContinuation<T, Error>) {
-        if let result = result {
-            switch result {
-            case .success(let value):
-                continuation.resume(returning: value)
-            case .failure(let error):
-                continuation.resume(throwing: error)
-            }
-        } else {
-            waiters.append(continuation)
-        }
-    }
-}
-
-extension ActorEdgeResultHandler {
-    /// Convenience initializer for testing with continuation
-    init<T>(continuation: CheckedContinuation<T, Error>, system: ActorEdgeSystem) {
-        self.init(
-            continuation: { value in
-                continuation.resume(returning: value)
-            },
-            errorContinuation: { error in
-                continuation.resume(throwing: error)
-            },
-            system: system
-        )
-    }
-    
-    /// Convenience initializer for testing with void continuation
-    init(voidContinuation: CheckedContinuation<Void, Error>, system: ActorEdgeSystem) {
-        self.init(
-            voidContinuation: {
-                voidContinuation.resume(returning: ())
-            },
-            errorContinuation: { error in
-                voidContinuation.resume(throwing: error)
-            },
-            system: system
-        )
-    }
-    
-    /// Convenience initializer for testing with response writer
-    init(responseWriter: MockResponseWriter, system: ActorEdgeSystem) {
-        self.init(
-            responseWriter: { data, manifest, isError, errorType in
-                responseWriter.write(data: data, manifest: manifest, isError: isError, errorType: errorType)
-            },
-            system: system
-        )
-    }
-}
-
-/// Mock response writer for testing
-private final class MockResponseWriter: @unchecked Sendable {
-    private(set) var writtenData: Data?
-    private(set) var manifest: SerializationManifest?
-    private(set) var isSuccess: Bool = false
-    private(set) var errorType: String?
-    
-    func write(data: Data, manifest: SerializationManifest, isError: Bool, errorType: String?) {
-        self.writtenData = data
-        self.manifest = manifest
-        self.isSuccess = !isError
-        self.errorType = errorType
+        
+        try await Task.sleep(for: .milliseconds(100))
+        receiveTask.cancel()
+        
+        #expect(receivedEnvelope != nil)
+        #expect(receivedEnvelope?.manifest.serializerID == "json")
+        #expect(receivedEnvelope?.payload.count ?? 0 > 100) // Complex message should be large
     }
 }

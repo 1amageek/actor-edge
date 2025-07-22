@@ -1,6 +1,7 @@
 import Testing
 @testable import ActorEdgeCore
 import Distributed
+import Foundation
 
 @Suite("Generic Type Substitution Tests", .tags(.core, .regression))
 struct GenericSubstitutionTests {
@@ -106,7 +107,7 @@ struct GenericSubstitutionTests {
         // Test generic substitutions decoding
         let substitutions = try decoder.decodeGenericSubstitutions()
         #expect(substitutions.count == 1)
-        #expect(substitutions[0] == TestMessage.self)
+        #expect(String(reflecting: substitutions[0]) == String(reflecting: TestMessage.self))
         
         // Test argument decoding
         let decodedMessage: TestMessage = try decoder.decodeNextArgument()

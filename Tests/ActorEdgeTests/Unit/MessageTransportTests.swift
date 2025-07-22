@@ -32,7 +32,7 @@ struct MessageTransportTests {
         _ = transport.isConnected
         _ = transport.metadata
         
-        #expect(true) // If we get here, all requirements are satisfied
+        #expect(Bool(true)) // If we get here, all requirements are satisfied
     }
     
     // MARK: - Send/Receive Tests
@@ -134,7 +134,7 @@ struct MessageTransportTests {
             #expect(error is TransportError)
             if let transportError = error as? TransportError {
                 if case .disconnected = transportError {
-                    #expect(true)
+                    #expect(Bool(true))
                 } else {
                     #expect(Bool(false), "Expected disconnected error")
                 }
@@ -171,7 +171,7 @@ struct MessageTransportTests {
             #expect(error is TransportError)
             if let transportError = error as? TransportError {
                 if case .sendFailed = transportError {
-                    #expect(true)
+                    #expect(Bool(true))
                 } else {
                     #expect(Bool(false), "Expected sendFailed error")
                 }

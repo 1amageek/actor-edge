@@ -5,6 +5,69 @@ import Distributed
 @testable import ActorEdgeServer
 @testable import ActorEdgeClient
 
+// MARK: - Test Types
+
+struct ComplexInput: Codable, Sendable {
+    let id: UUID
+    let data: [String: Int]
+    let timestamp: Date
+}
+
+struct ComplexOutput: Codable, Sendable {
+    let processedId: UUID
+    let result: Int
+    let processingTime: TimeInterval
+}
+
+// MARK: - Test Actors
+
+@Resolvable
+protocol LatencyTestService: DistributedActor where ActorSystem == ActorEdgeSystem {
+    distributed func ping() async throws
+    distributed func echo(_ value: Int) async throws -> Int
+    distributed func processWithDelay(_ data: Data, delayMS: Int) async throws -> Int
+    distributed func complexOperation(_ input: ComplexInput) async throws -> ComplexOutput
+}
+
+distributed actor LatencyTestActor: LatencyTestService {
+    public typealias ActorSystem = ActorEdgeSystem
+    
+    init(actorSystem: ActorSystem) {
+        self.actorSystem = actorSystem
+    }
+    
+    distributed func ping() async throws {
+        // No-op, just measuring round-trip time
+    }
+    
+    distributed func echo(_ value: Int) async throws -> Int {
+        return value
+    }
+    
+    distributed func processWithDelay(_ data: Data, delayMS: Int) async throws -> Int {
+        try await Task.sleep(for: .milliseconds(delayMS))
+        return data.count
+    }
+    
+    distributed func complexOperation(_ input: ComplexInput) async throws -> ComplexOutput {
+        let start = ContinuousClock.now
+        
+        // Simulate some processing
+        var sum = 0
+        for (_, value) in input.data {
+            sum += value
+        }
+        
+        let processingTime = start.duration(to: ContinuousClock.now).timeInterval
+        
+        return ComplexOutput(
+            processedId: input.id,
+            result: sum,
+            processingTime: processingTime
+        )
+    }
+}
+
 /// Performance test suite for measuring latency
 @Suite("Latency Performance Tests", .tags(.performance))
 struct LatencyTests {
@@ -67,8 +130,9 @@ struct LatencyTests {
             self.p99 = sorted[Swift.min(p99Index, sorted.count - 1)]
             
             // Standard deviation
+            let meanValue = self.mean  // Capture mean value
             let variance = latencies.reduce(0) { sum, latency in
-                sum + pow(latency - mean, 2)
+                sum + pow(latency - meanValue, 2)
             } / Double(latencies.count)
             self.stdDev = sqrt(variance)
         }
@@ -84,65 +148,6 @@ struct LatencyTests {
               P99: \(String(format: "%.2f", p99))
               StdDev: \(String(format: "%.2f", stdDev))
             """
-        }
-    }
-    
-    // MARK: - Test Types
-    
-    struct ComplexInput: Codable, Sendable {
-        let id: UUID
-        let data: [String: Int]
-        let timestamp: Date
-    }
-    
-    struct ComplexOutput: Codable, Sendable {
-        let processedId: UUID
-        let result: Int
-        let processingTime: TimeInterval
-    }
-    
-    // MARK: - Test Actors
-    
-    @Resolvable
-    protocol LatencyTestService: DistributedActor where ActorSystem == ActorEdgeSystem {
-        distributed func ping() async throws
-        distributed func echo(_ value: Int) async throws -> Int
-        distributed func processWithDelay(_ data: Data, delayMS: Int) async throws -> Int
-        distributed func complexOperation(_ input: ComplexInput) async throws -> ComplexOutput
-    }
-    
-    distributed actor LatencyTestActor: LatencyTestService {
-        public typealias ActorSystem = ActorEdgeSystem
-        
-        init(actorSystem: ActorSystem) {
-            self.actorSystem = actorSystem
-        }
-        
-        distributed func ping() async throws {
-            // Simple no-op for measuring round-trip time
-        }
-        
-        distributed func echo(_ value: Int) async throws -> Int {
-            return value
-        }
-        
-        distributed func processWithDelay(_ data: Data, delayMS: Int) async throws -> Int {
-            // Simulate processing time
-            try await Task.sleep(nanoseconds: UInt64(delayMS) * 1_000_000)
-            return data.count
-        }
-        
-        distributed func complexOperation(_ input: ComplexInput) async throws -> ComplexOutput {
-            let startTime = CFAbsoluteTimeGetCurrent()
-            
-            // Simulate complex processing
-            let result = input.data.values.reduce(0, +)
-            
-            return ComplexOutput(
-                processedId: input.id,
-                result: result,
-                processingTime: CFAbsoluteTimeGetCurrent() - startTime
-            )
         }
     }
     

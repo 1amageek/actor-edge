@@ -30,7 +30,7 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
     private var genericSubstitutions: [String] = []
     
     /// Whether the method returns Void
-    private var isVoid: Bool = false
+    private var isVoid: Bool = true  // Default to true, recordReturnType will set to false if non-void
     
     /// Whether the method can throw
     private var canThrow: Bool = false
@@ -90,9 +90,11 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
             throw ActorEdgeError.invocationError("Cannot record return type after doneRecording()")
         }
         
-        // Check if void return
-        isVoid = returnType == Void.self
-        self.returnType = String(reflecting: returnType)
+        // Check if void return - but since Void doesn't conform to Codable, 
+        // this method won't be called for void returns, so set to false
+        isVoid = false
+        // Store mangled name for runtime resolution
+        self.returnType = _mangledTypeName(returnType) ?? String(reflecting: returnType)
     }
     
     public mutating func recordErrorType<E: Error>(_ errorType: E.Type) throws {
@@ -102,7 +104,8 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
         
         // Mark as throwing method
         canThrow = true
-        self.errorType = String(reflecting: errorType)
+        // Store mangled name for runtime resolution
+        self.errorType = _mangledTypeName(errorType) ?? String(reflecting: errorType)
     }
     
     public mutating func doneRecording() throws {
@@ -130,7 +133,9 @@ public struct ActorEdgeInvocationEncoder: DistributedTargetInvocationEncoder {
             arguments: argumentData,
             argumentManifests: argumentManifests,
             genericSubstitutions: genericSubstitutions,
-            isVoid: isVoid
+            isVoid: isVoid,
+            returnType: returnType,
+            errorType: errorType
         )
     }
 }

@@ -3,6 +3,7 @@ import Testing
 import ActorEdgeServer
 import ActorEdgeClient
 import Distributed
+import Foundation
 
 @Suite("Client-Server Integration Tests", .tags(.integration))
 struct ClientServerIntegrationTests {
@@ -88,9 +89,19 @@ struct ClientServerIntegrationTests {
             try await remoteActor.throwsError()
         }
         
-        // Test specific error
-        await #expect(throws: TestError.self) {
+        // Test specific error - errors are wrapped in ActorEdgeError for remote calls
+        do {
             try await remoteActor.throwsSpecificError(.networkError)
+            Issue.record("Expected error to be thrown")
+        } catch let error as ActorEdgeError {
+            switch error {
+            case .remoteCallError(let message):
+                #expect(message == "networkError")
+            default:
+                Issue.record("Expected remoteCallError but got \(error)")
+            }
+        } catch {
+            Issue.record("Unexpected error type: \(error)")
         }
     }
     
@@ -216,14 +227,20 @@ struct ClientServerIntegrationTests {
         // Reset transport and retry
         clientTransport.shouldThrowError = false
         let testMessage = TestMessage(content: "Recovery test")
+        // Create proper InvocationResult for response
+        let serialization = SerializationSystem()
+        let serializedMessage = try serialization.serialize(testMessage)
+        let result = InvocationResult.success(serializedMessage)
+        let resultData = try serialization.serialize(result)
+        
         clientTransport.mockResponse = TestHelpers.makeTestEnvelope(
             type: .response,
-            payload: try JSONEncoder().encode(testMessage)
+            payload: resultData.data
         )
         
         // Call should now succeed
-        let result = try await remoteActor.echo(testMessage)
-        #expect(result.content == testMessage.content)
+        let echoResult = try await remoteActor.echo(testMessage)
+        #expect(echoResult.content == testMessage.content)
     }
     
     @Test("Multiple actors on same system")
@@ -254,7 +271,7 @@ struct ClientServerIntegrationTests {
     
     @Test("Actor not found error")
     func actorNotFoundError() async throws {
-        let (client, server) = TestHelpers.makeConnectedPair()
+        let (client, _) = TestHelpers.makeConnectedPair()
         
         // Try to resolve non-existent actor
         let nonExistentID = ActorEdgeID("non-existent-actor")

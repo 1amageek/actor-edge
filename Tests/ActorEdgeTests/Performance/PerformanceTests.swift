@@ -61,7 +61,7 @@ struct PerformanceTests {
         server.setPreAssignedIDs(["perf-actor"])
         
         let actor = TestActorImpl(actorSystem: server)
-        let remoteActor = try $TestActorProtocol.resolve(id: actor.id, using: client)
+        let remoteActor = try $TestActor.resolve(id: actor.id, using: client)
         
         let messageCount = 100
         let messages = (0..<messageCount).map { TestMessage(content: "Message \($0)") }
@@ -94,7 +94,7 @@ struct PerformanceTests {
         let system = ActorEdgeSystem()
         
         // Create and destroy many actors
-        for batch in 0..<10 {
+        for _ in 0..<10 {
             var actors: [TestActorImpl] = []
             
             // Create 100 actors
@@ -117,7 +117,7 @@ struct PerformanceTests {
         }
         
         // Test passes if we reach here without memory issues
-        #expect(true, "Memory usage appears stable")
+        #expect(Bool(true), "Memory usage appears stable")
     }
     
     @Test("Invocation encoding performance", .timeLimit(.minutes(1)))

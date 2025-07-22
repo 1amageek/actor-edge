@@ -3,12 +3,9 @@ import Testing
 import Distributed
 import Foundation
 
-@Suite("Complex Type Tests", .tags(.integration, .serialization))
-struct ComplexTypeTests {
-    
-    // MARK: - Complex Type Definitions
-    
-    struct NestedComplexType: Codable, Sendable, Equatable {
+// MARK: - Complex Type Definitions
+
+struct NestedComplexType: Codable, @unchecked Sendable, Equatable {
         let id: UUID
         let matrix: [[Double]]
         let metadata: [String: [String: Any]]
@@ -161,7 +158,6 @@ struct ComplexTypeTests {
     protocol ComplexTypeActor: DistributedActor where ActorSystem == ActorEdgeSystem {
         distributed func processNestedType(_ input: NestedComplexType) async throws -> NestedComplexType
         distributed func processRecursiveType(_ input: RecursiveType) async throws -> RecursiveType
-        distributed func processMixedArray(_ items: [Any]) async throws -> [String]
         distributed func processLargeCollection(_ count: Int) async throws -> [TestMessage]
         distributed func processDeepNesting(_ depth: Int) async throws -> RecursiveType
     }
@@ -222,11 +218,6 @@ struct ComplexTypeTests {
             )
         }
         
-        distributed func processMixedArray(_ items: [Any]) async throws -> [String] {
-            // This would normally require custom serialization
-            // For testing, we'll simulate it
-            return items.map { String(describing: $0) }
-        }
         
         distributed func processLargeCollection(_ count: Int) async throws -> [TestMessage] {
             return (0..<count).map { index in
@@ -242,7 +233,10 @@ struct ComplexTypeTests {
         }
     }
     
-    // MARK: - Tests
+// MARK: - Test Suite
+
+@Suite("Complex Type Tests", .tags(.integration, .serialization))
+struct ComplexTypeTests {
     
     @Test("Nested complex type serialization")
     func nestedComplexTypeSerialization() async throws {

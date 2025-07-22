@@ -99,9 +99,8 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
         switch state {
         case .remoteCall(let data):
             guard argumentIndex < data.arguments.count else {
-                throw DecodingError.notEnoughArguments(
-                    expected: argumentIndex + 1,
-                    actual: data.arguments.count
+                throw ActorEdgeError.invocationError(
+                    "Not enough arguments: expected at least \(argumentIndex + 1), got \(data.arguments.count)"
                 )
             }
             argumentData = data.arguments[argumentIndex]
@@ -114,9 +113,8 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
         case .localCall(let encoder):
             let invocationData = try encoder.finalizeInvocation()
             guard argumentIndex < invocationData.arguments.count else {
-                throw DecodingError.notEnoughArguments(
-                    expected: argumentIndex + 1,
-                    actual: invocationData.arguments.count
+                throw ActorEdgeError.invocationError(
+                    "Not enough arguments: expected at least \(argumentIndex + 1), got \(invocationData.arguments.count)"
                 )
             }
             argumentData = invocationData.arguments[argumentIndex]
@@ -162,15 +160,35 @@ public struct ActorEdgeInvocationDecoder: DistributedTargetInvocationDecoder {
     }
     
     public mutating func decodeReturnType() throws -> Any.Type? {
-        // Return type information is not stored in the simplified design
-        // The runtime already knows the return type from the method signature
-        return nil
+        guard case .remoteCall(let invocationData) = state else {
+            throw ActorEdgeError.invocationError("Cannot decode return type in local call state")
+        }
+        
+        // If void return, return Void.self
+        if invocationData.isVoid {
+            return Void.self
+        }
+        
+        // Otherwise, resolve the return type from the mangled name
+        guard let returnTypeName = invocationData.returnType else {
+            return nil
+        }
+        
+        return try _typeByName(returnTypeName)
     }
     
     public mutating func decodeErrorType() throws -> Any.Type? {
-        // Error type information is not stored in the simplified design
-        // The runtime already knows the error type from the method signature
-        return nil
+        guard case .remoteCall(let invocationData) = state else {
+            throw ActorEdgeError.invocationError("Cannot decode error type in local call state")
+        }
+        
+        // If no error type stored, return nil
+        guard let errorTypeName = invocationData.errorType else {
+            return nil
+        }
+        
+        // Resolve the error type from the mangled name
+        return try _typeByName(errorTypeName)
     }
     
 }

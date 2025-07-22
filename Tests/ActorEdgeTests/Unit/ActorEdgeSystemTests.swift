@@ -197,6 +197,7 @@ struct ActorEdgeSystemTests {
         transport.mockResponse = responseEnvelope
         
         var encoder = system.makeInvocationEncoder()
+        // For void calls, we don't record a return type, but the system should handle it
         
         let target = RemoteCallTarget( "doSomething")
         

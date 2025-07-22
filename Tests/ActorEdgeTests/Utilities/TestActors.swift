@@ -59,6 +59,45 @@ public struct ComplexMessage: Codable, Sendable, Equatable {
     }
 }
 
+/// Complex test message for advanced testing
+public struct ComplexTestMessage: Codable, Sendable, Equatable {
+    public let messages: [TestMessage]
+    public let metadata: [String: String]
+    public let optional: String?
+    public let numbers: [Int]
+    public let nested: NestedData
+    
+    public struct NestedData: Codable, Sendable, Equatable {
+        public let flag: Bool
+        public let values: [String: Double]
+        
+        public init(flag: Bool = true, values: [String: Double] = [:]) {
+            self.flag = flag
+            self.values = values
+        }
+    }
+    
+    public init(
+        messages: [TestMessage] = [],
+        metadata: [String: String] = [:],
+        optional: String? = nil,
+        numbers: [Int] = [],
+        nested: NestedData = NestedData()
+    ) {
+        self.messages = messages
+        self.metadata = metadata
+        self.optional = optional
+        self.numbers = numbers
+        self.nested = nested
+    }
+    
+    @_optimize(none)
+    public static func _forceTypeRetention() {
+        _ = ComplexTestMessage.self
+        _ = String(reflecting: ComplexTestMessage.self)
+    }
+}
+
 // MARK: - Test Error Types
 
 /// Test error types
@@ -69,6 +108,12 @@ public enum TestError: Error, Codable, Sendable, Equatable {
     case networkError
     case timeoutError
     case validationError(field: String, message: String)
+    
+    @_optimize(none)
+    public static func _forceTypeRetention() {
+        _ = TestError.self
+        _ = String(reflecting: TestError.self)
+    }
 }
 
 // MARK: - Test Actor Protocols and Implementations

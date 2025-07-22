@@ -51,22 +51,23 @@ public struct TestHelpers {
                         invocationData: invocationData
                     )
                     
-                    // Create result handler
-                    let resultHandler = ActorEdgeResultHandler(
-                        continuation: nil,
-                        voidContinuation: nil,
+                    // Create response writer
+                    let responseWriter = InvocationResponseWriter(
+                        processor: DistributedInvocationProcessor(
+                            serialization: server.serialization
+                        ),
+                        transport: serverTransport,
+                        recipient: envelope.sender ?? envelope.recipient,
+                        correlationID: envelope.metadata.callID,
+                        sender: envelope.recipient
+                    )
+                    
+                    // Create result handler for remote call
+                    let resultHandler = ActorEdgeResultHandler.forRemoteCall(
                         system: server,
-                        callID: envelope.metadata.callID
-                    ) { result in
-                        let resultData = try server.serialization.serialize(result)
-                        let response = Envelope.response(
-                            to: envelope.sender ?? envelope.recipient,
-                            callID: envelope.metadata.callID,
-                            manifest: resultData.manifest,
-                            payload: resultData.data
-                        )
-                        _ = try await serverTransport.send(response)
-                    }
+                        callID: envelope.metadata.callID,
+                        responseWriter: responseWriter
+                    )
                     
                     // Execute the distributed target
                     try await server.executeDistributedTarget(
@@ -110,7 +111,7 @@ public struct TestHelpers {
             }
             try await Task.sleep(for: .milliseconds(100))
         }
-        Issue.record("Condition not met within timeout", sourceLocation: SourceLocation(fileID: file.description, line: Int(line)))
+        Issue.record("Condition not met within timeout")
     }
     
     /// Create test envelope
@@ -144,34 +145,22 @@ public struct TestHelpers {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let location = SourceLocation(fileID: file.description, line: Int(line))
+        // SourceLocation API has changed, we'll remove custom location
         
         #expect(actual.recipient == expected.recipient, 
-               "Recipients don't match", sourceLocation: location)
+               "Recipients don't match")
         #expect(actual.sender == expected.sender, 
-               "Senders don't match", sourceLocation: location)
+               "Senders don't match")
         #expect(actual.messageType == expected.messageType, 
-               "Message types don't match", sourceLocation: location)
+               "Message types don't match")
         #expect(actual.metadata.target == expected.metadata.target, 
-               "Targets don't match", sourceLocation: location)
+               "Targets don't match")
         #expect(actual.payload == expected.payload, 
-               "Payloads don't match", sourceLocation: location)
+               "Payloads don't match")
     }
     
-    /// Create a fully configured server system with actor
-    public static func makeServerWithActor<Act: DistributedActor>(
-        actorType: Act.Type,
-        actorID: String = "test-actor"
-    ) -> (system: ActorEdgeSystem, actor: Act, transport: InMemoryMessageTransport) 
-    where Act.ActorSystem == ActorEdgeSystem {
-        let system = ActorEdgeSystem(metricsNamespace: "test_server")
-        system.setPreAssignedIDs([actorID])
-        
-        let actor = actorType.init(actorSystem: system)
-        let transport = InMemoryMessageTransport()
-        
-        return (system, actor, transport)
-    }
+    // Removed makeServerWithActor as it cannot be implemented generically
+    // Each test should create actors directly with their specific types
     
     /// Create envelope factory for testing
     public struct EnvelopeFactory {
@@ -261,22 +250,3 @@ extension Duration {
     }
 }
 
-// MARK: - Service Context Keys for Testing
-
-/// Test context key for tracing
-public enum TestTraceIDKey: ServiceContextKey {
-    public typealias Value = String
-    public static var defaultValue: String { "" }
-}
-
-/// Test context key for user information
-public enum TestUserIDKey: ServiceContextKey {
-    public typealias Value = String
-    public static var defaultValue: String { "" }
-}
-
-/// Test context key for correlation
-public enum TestCorrelationIDKey: ServiceContextKey {
-    public typealias Value = String
-    public static var defaultValue: String { "" }
-}

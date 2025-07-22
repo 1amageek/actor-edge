@@ -26,16 +26,26 @@ public struct InvocationData: Codable, Sendable {
     /// Whether the method returns Void
     public let isVoid: Bool
     
+    /// Return type (mangled type name) - nil for void returns
+    public let returnType: String?
+    
+    /// Error type (mangled type name) - nil for non-throwing methods
+    public let errorType: String?
+    
     public init(
         arguments: [Data] = [],
         argumentManifests: [SerializationManifest] = [],
         genericSubstitutions: [String] = [],
-        isVoid: Bool = false
+        isVoid: Bool = false,
+        returnType: String? = nil,
+        errorType: String? = nil
     ) {
         self.arguments = arguments
         self.argumentManifests = argumentManifests
         self.genericSubstitutions = genericSubstitutions
         self.isVoid = isVoid
+        self.returnType = returnType
+        self.errorType = errorType
     }
 }
 

@@ -67,9 +67,13 @@ public final class MockMessageTransport: MessageTransport, @unchecked Sendable {
             _sentEnvelopes.append(envelope)
             _callCount += 1
             
-            // Count void calls
-            if envelope.messageType == .invocation && _mockResponse == nil {
-                _voidCallCount += 1
+            // Count void calls based on the invocation metadata
+            if envelope.messageType == .invocation {
+                // Check if this is a void invocation
+                if let invocationData = try? JSONDecoder().decode(InvocationData.self, from: envelope.payload),
+                   invocationData.isVoid {
+                    _voidCallCount += 1
+                }
             }
         }
         
