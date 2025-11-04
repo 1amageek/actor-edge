@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import ActorRuntime
 @testable import ActorEdgeCore
 import Distributed
 
@@ -7,105 +8,7 @@ import Distributed
 public struct TestHelpers {
     /// Test timeout duration
     public static let testTimeout: Duration = .seconds(30)
-    
-    /// Create a test actor system
-    public static func makeTestActorSystem(namespace: String = "test") -> ActorEdgeSystem {
-        let configuration = ActorEdgeSystem.Configuration(
-            metrics: .init(namespace: namespace)
-        )
-        return ActorEdgeSystem(configuration: configuration)
-    }
-    
-    /// Create connected client-server pair
-    public static func makeConnectedPair() -> (client: ActorEdgeSystem, server: ActorEdgeSystem) {
-        let (clientTransport, serverTransport) = InMemoryMessageTransport.createConnectedPair()
-        let clientConfig = ActorEdgeSystem.Configuration(
-            metrics: .init(namespace: "test_client")
-        )
-        let serverConfig = ActorEdgeSystem.Configuration(
-            metrics: .init(namespace: "test_server")
-        )
-        let client = ActorEdgeSystem(transport: clientTransport, configuration: clientConfig)
-        let server = ActorEdgeSystem(configuration: serverConfig)
-        
-        // Set up server to handle messages with full distributed actor processing
-        Task {
-            for await envelope in serverTransport.receive() {
-                do {
-                    guard envelope.messageType == .invocation else { continue }
-                    
-                    // Find the actor
-                    guard let actor = server.findActor(id: envelope.recipient) else {
-                        let errorData = try server.serialization.serialize(
-                            ActorEdgeError.actorNotFound(envelope.recipient)
-                        )
-                        let errorResponse = Envelope.error(
-                            to: envelope.sender ?? envelope.recipient,
-                            callID: envelope.metadata.callID,
-                            manifest: errorData.manifest,
-                            payload: errorData.data
-                        )
-                        _ = try await serverTransport.send(errorResponse)
-                        continue
-                    }
-                    
-                    // Create decoder
-                    let invocationData = try server.serialization.deserialize(
-                        envelope.payload,
-                        as: InvocationData.self,
-                        using: envelope.manifest
-                    )
-                    var decoder = ActorEdgeInvocationDecoder(
-                        system: server,
-                        invocationData: invocationData
-                    )
-                    
-                    // Create response writer
-                    let responseWriter = InvocationResponseWriter(
-                        processor: DistributedInvocationProcessor(
-                            serialization: server.serialization
-                        ),
-                        transport: serverTransport,
-                        recipient: envelope.sender ?? envelope.recipient,
-                        correlationID: envelope.metadata.callID,
-                        sender: envelope.recipient
-                    )
-                    
-                    // Create result handler for remote call
-                    let resultHandler = ActorEdgeResultHandler.forRemoteCall(
-                        system: server,
-                        callID: envelope.metadata.callID,
-                        responseWriter: responseWriter
-                    )
-                    
-                    // Execute the distributed target
-                    try await server.executeDistributedTarget(
-                        on: actor,
-                        target: RemoteCallTarget(envelope.metadata.target),
-                        invocationDecoder: &decoder,
-                        handler: resultHandler
-                    )
-                } catch {
-                    // Send error response
-                    let errorData = try? server.serialization.serialize(
-                        ActorEdgeError.invocationError("Remote call failed: \(error)")
-                    )
-                    if let errorData = errorData {
-                        let errorResponse = Envelope.error(
-                            to: envelope.sender ?? envelope.recipient,
-                            callID: envelope.metadata.callID,
-                            manifest: errorData.manifest,
-                            payload: errorData.data
-                        )
-                        _ = try? await serverTransport.send(errorResponse)
-                    }
-                }
-            }
-        }
-        
-        return (client, server)
-    }
-    
+
     /// Wait for async condition with timeout
     public static func waitForCondition(
         timeout: Duration = testTimeout,
@@ -122,128 +25,130 @@ public struct TestHelpers {
         }
         Issue.record("Condition not met within timeout")
     }
-    
-    /// Create test envelope
-    public static func makeTestEnvelope(
-        to recipient: ActorEdgeID = ActorEdgeID("test-actor"),
-        from sender: ActorEdgeID? = ActorEdgeID("test-sender"),
-        type: MessageType = .invocation,
+
+    /// Create test invocation envelope
+    public static func makeTestInvocation(
+        recipientID: String = "test-actor",
+        callID: String = UUID().uuidString,
         target: String = "testMethod",
-        payload: Data = Data("test".utf8)
-    ) -> Envelope {
-        let metadata = MessageMetadata(
-            callID: UUID().uuidString,
+        genericSubstitutions: [String] = [],
+        arguments: Data = Data()
+    ) -> InvocationEnvelope {
+        return InvocationEnvelope(
+            callID: callID,
+            recipientID: recipientID,
             target: target,
-            headers: [:]
-        )
-        
-        return Envelope(
-            recipient: recipient,
-            sender: sender,
-            manifest: SerializationManifest.json(),
-            payload: payload,
-            metadata: metadata,
-            messageType: type
+            genericSubstitutions: genericSubstitutions,
+            arguments: arguments
         )
     }
-    
-    /// Assert envelope equality
-    public static func assertEnvelopeEqual(
-        _ actual: Envelope,
-        _ expected: Envelope,
+
+    /// Create test response envelope
+    public static func makeTestResponse(
+        callID: String = UUID().uuidString,
+        success: Data = Data()
+    ) -> ResponseEnvelope {
+        return ResponseEnvelope(
+            callID: callID,
+            result: .success(success)
+        )
+    }
+
+    /// Create test error response
+    public static func makeTestErrorResponse(
+        callID: String = UUID().uuidString,
+        error: RuntimeError = .executionFailed("Test error", underlying: "Test")
+    ) -> ResponseEnvelope {
+        return ResponseEnvelope(
+            callID: callID,
+            result: .failure(error)
+        )
+    }
+
+    /// Assert invocation envelope equality
+    public static func assertInvocationEqual(
+        _ actual: InvocationEnvelope,
+        _ expected: InvocationEnvelope,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        // SourceLocation API has changed, we'll remove custom location
-        
-        #expect(actual.recipient == expected.recipient, 
-               "Recipients don't match")
-        #expect(actual.sender == expected.sender, 
-               "Senders don't match")
-        #expect(actual.messageType == expected.messageType, 
-               "Message types don't match")
-        #expect(actual.metadata.target == expected.metadata.target, 
+        #expect(actual.callID == expected.callID,
+               "CallIDs don't match")
+        #expect(actual.recipientID == expected.recipientID,
+               "RecipientIDs don't match")
+        #expect(actual.target == expected.target,
                "Targets don't match")
-        #expect(actual.payload == expected.payload, 
-               "Payloads don't match")
+        #expect(actual.genericSubstitutions == expected.genericSubstitutions,
+               "Generic substitutions don't match")
+        #expect(actual.arguments == expected.arguments,
+               "Arguments don't match")
     }
-    
-    // Removed makeServerWithActor as it cannot be implemented generically
-    // Each test should create actors directly with their specific types
-    
-    /// Create envelope factory for testing
+
+    /// Assert response envelope equality
+    public static func assertResponseEqual(
+        _ actual: ResponseEnvelope,
+        _ expected: ResponseEnvelope,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        #expect(actual.callID == expected.callID,
+               "CallIDs don't match")
+
+        switch (actual.result, expected.result) {
+        case (.success(let actualData), .success(let expectedData)):
+            #expect(actualData == expectedData, "Success data doesn't match")
+        case (.void, .void):
+            break
+        case (.failure(let actualError), .failure(let expectedError)):
+            #expect(actualError == expectedError, "Errors don't match")
+        default:
+            Issue.record("Result types don't match")
+        }
+    }
+
+    /// Envelope factory for testing
     public struct EnvelopeFactory {
-        
-        /// Create a basic invocation envelope
-        public static func invocation(
-            to recipient: ActorEdgeID = ActorEdgeID(),
-            from sender: ActorEdgeID? = ActorEdgeID(),
-            target: String = "testMethod",
-            callID: String = UUID().uuidString,
-            payload: Data = Data("test payload".utf8),
-            headers: [String: String] = [:]
-        ) -> Envelope {
-            return Envelope.invocation(
-                to: recipient,
-                from: sender,
-                target: target,
-                callID: callID,
-                manifest: SerializationManifest(serializerID: "json"),
-                payload: payload,
-                headers: headers
-            )
-        }
-        
-        /// Create a response envelope
-        public static func response(
-            to recipient: ActorEdgeID = ActorEdgeID(),
-            from sender: ActorEdgeID? = ActorEdgeID(),
-            callID: String = UUID().uuidString,
-            payload: Data = Data("response data".utf8),
-            headers: [String: String] = [:]
-        ) -> Envelope {
-            return Envelope.response(
-                to: recipient,
-                from: sender,
-                callID: callID,
-                manifest: SerializationManifest(serializerID: "json"),
-                payload: payload,
-                headers: headers
-            )
-        }
-        
-        /// Create an error envelope
-        public static func error(
-            to recipient: ActorEdgeID = ActorEdgeID(),
-            from sender: ActorEdgeID? = ActorEdgeID(),
-            callID: String = UUID().uuidString,
-            error: Error,
-            headers: [String: String] = [:]
-        ) -> Envelope {
-            let errorData = try! JSONEncoder().encode(error.localizedDescription)
-            
-            return Envelope.error(
-                to: recipient,
-                from: sender,
-                callID: callID,
-                manifest: SerializationManifest(serializerID: "json"),
-                payload: errorData,
-                headers: headers
-            )
-        }
-        
-        /// Create a batch of test envelopes
+
+        /// Create a batch of test invocations
         public static func batch(
             count: Int,
             targetPrefix: String = "method",
-            payloadPrefix: String = "data"
-        ) -> [Envelope] {
+            recipientID: String = "test-actor"
+        ) -> [InvocationEnvelope] {
             return (0..<count).map { i in
-                invocation(
-                    target: "\(targetPrefix)-\(i)",
-                    payload: Data("\(payloadPrefix)-\(i)".utf8)
+                TestHelpers.makeTestInvocation(
+                    recipientID: recipientID,
+                    target: "\(targetPrefix)-\(i)"
                 )
             }
+        }
+
+        /// Create invocation with encoded argument
+        public static func invocationWithArgument<T: Codable>(
+            _ argument: T,
+            recipientID: String = "test-actor",
+            target: String = "testMethod"
+        ) throws -> InvocationEnvelope {
+            let argumentData = try JSONEncoder().encode(argument)
+            return InvocationEnvelope(
+                callID: UUID().uuidString,
+                recipientID: recipientID,
+                target: target,
+                genericSubstitutions: [],
+                arguments: argumentData
+            )
+        }
+
+        /// Create response with encoded result
+        public static func responseWithResult<T: Codable>(
+            _ result: T,
+            callID: String = UUID().uuidString
+        ) throws -> ResponseEnvelope {
+            let resultData = try JSONEncoder().encode(result)
+            return ResponseEnvelope(
+                callID: callID,
+                result: .success(resultData)
+            )
         }
     }
 }
@@ -258,4 +163,3 @@ extension Duration {
         return seconds + fractional
     }
 }
-

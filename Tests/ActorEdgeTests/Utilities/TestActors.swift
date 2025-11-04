@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 @testable import ActorEdgeCore
+import ActorRuntime
 import Distributed
 
 // MARK: - Test Message Types
@@ -168,7 +169,7 @@ public distributed actor TestActorImpl: TestActor {
     }
     
     public distributed func throwsError() async throws {
-        throw ActorEdgeError.timeout
+        throw RuntimeError.timeout(30)
     }
     
     public distributed func throwsSpecificError(_ error: TestError) async throws {
@@ -332,7 +333,7 @@ public distributed actor ComplexTestActorImpl: ComplexTestActor {
     }
     
     public distributed func processComplex(_ message: ComplexMessage) async throws -> ComplexMessage {
-        var processed = message
+        let processed = message
         // Add a processing marker
         var newValues = processed.nested.values
         newValues["processed"] = 1.0

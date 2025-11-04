@@ -36,7 +36,8 @@
       "Bash(md5sum:*)",
       "WebFetch(domain:swiftinit.org)",
       "Bash(.build/debug/SampleChat)",
-      "Bash(timeout 5 swift run SampleChat)"
+      "Bash(timeout 5 swift run SampleChat)",
+      "Bash(cat:*)"
     ],
     "deny": []
   }

@@ -27,23 +27,24 @@ let package = Package(
             targets: ["ActorEdgeClient"]),
     ],
     dependencies: [
+        // Actor Runtime
+        .package(url: "https://github.com/1amageek/swift-actor-runtime.git", exact: "0.2.0"),
+
         // Networking
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.84.0"),
         .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.32.0"),
         .package(url: "https://github.com/grpc/grpc-swift-2.git", exact: "2.0.0"),
         .package(url: "https://github.com/grpc/grpc-swift-nio-transport.git", exact: "2.0.0"),
-        .package(url: "https://github.com/grpc/grpc-swift-protobuf.git", exact: "2.0.0"),
-        // .package(url: "https://github.com/grpc/grpc-swift-extras.git", branch: "main"),
-        .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.30.0"),
-        
+        // Note: grpc-swift-protobuf and swift-protobuf removed - using JSON serialization for Codable types
+
         // Logging and Lifecycle
         .package(url: "https://github.com/apple/swift-log.git", from: "1.6.3"),
         .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.8.0"),
-        
+
         // Tracing and Context
         .package(url: "https://github.com/apple/swift-distributed-tracing.git", from: "1.2.1"),
         .package(url: "https://github.com/apple/swift-service-context.git", from: "1.2.1"),
-        
+
         // Metrics
         .package(url: "https://github.com/apple/swift-metrics.git", from: "2.7.0"),
     ],
@@ -58,25 +59,18 @@ let package = Package(
         .target(
             name: "ActorEdgeCore",
             dependencies: [
+                .product(name: "ActorRuntime", package: "swift-actor-runtime"),
                 .product(name: "NIO", package: "swift-nio"),
                 .product(name: "NIOSSL", package: "swift-nio-ssl"),
                 .product(name: "GRPCCore", package: "grpc-swift-2"),
                 .product(name: "GRPCNIOTransportHTTP2", package: "grpc-swift-nio-transport"),
-                .product(name: "GRPCProtobuf", package: "grpc-swift-protobuf"),
-                .product(name: "SwiftProtobuf", package: "swift-protobuf"),
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Tracing", package: "swift-distributed-tracing"),
                 .product(name: "ServiceContextModule", package: "swift-service-context"),
                 .product(name: "Metrics", package: "swift-metrics"),
             ],
-            resources: [
-                .process("swift-protobuf-config.json")
-            ],
             swiftSettings: [
                 .define("DEBUG", .when(configuration: .debug))
-            ],
-            plugins: [
-                .plugin(name: "SwiftProtobufPlugin", package: "swift-protobuf")
             ]
         ),
         

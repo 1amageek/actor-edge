@@ -40,7 +40,6 @@ public actor ActorEdgeService: Service {
     private var eventLoopGroup: MultiThreadedEventLoopGroup?
     private var grpcServer: GRPCServer<HTTP2ServerTransport.Posix>?
     private var actorSystem: ActorEdgeSystem?
-    private var protocolIndependentServer: ActorEdgeServer?
     
     public init(configuration: Configuration) {
         self.configuration = configuration
@@ -58,12 +57,6 @@ public actor ActorEdgeService: Service {
         // Create event loop group
         let elg = MultiThreadedEventLoopGroup(numberOfThreads: configuration.threads)
         eventLoopGroup = elg
-        
-        // Create gRPC server transport
-        let serverTransport = GRPCServerTransport(
-            eventLoopGroup: elg,
-            metricsNamespace: configuration.server.metrics.namespace
-        )
         
         // Create actor system (server-side doesn't need transport for local actors)
         let systemConfig = ActorEdgeSystem.Configuration(
@@ -86,10 +79,6 @@ public actor ActorEdgeService: Service {
             logger.info("Created actor", metadata: ["type": "\(type(of: actor))"])
         }
         
-        // Create protocol-independent server
-        let server = ActorEdgeServer(system: system, transport: serverTransport)
-        protocolIndependentServer = server
-        
         // Create HTTP/2 transport for gRPC
         let host = configuration.server.host
         let port = configuration.server.port
@@ -109,8 +98,11 @@ public actor ActorEdgeService: Service {
             )
         }
         
+        // Create distributed actor service
+        let distributedActorService = DistributedActorService(system: system)
+
         // Create gRPC server
-        let grpc = GRPCServer(transport: transportConfig, services: [serverTransport])
+        let grpc = GRPCServer(transport: transportConfig, services: [distributedActorService])
         grpcServer = grpc
         
         logger.info("ActorEdge service configured", metadata: [
@@ -120,25 +112,12 @@ public actor ActorEdgeService: Service {
             "maxConnections": "\(configuration.server.maxConnections)"
         ])
         
-        // Start both servers concurrently
-        await withTaskGroup(of: Void.self) { group in
-            // Start the protocol-independent server
-            group.addTask {
-                do {
-                    try await server.start()
-                } catch {
-                    self.logger.error("Protocol-independent server error", metadata: ["error": "\(error)"])
-                }
-            }
-            
-            // Start the gRPC server
-            group.addTask {
-                do {
-                    try await grpc.serve()
-                } catch {
-                    self.logger.error("gRPC server error", metadata: ["error": "\(error)"])
-                }
-            }
+        // Start the gRPC server
+        do {
+            try await grpc.serve()
+        } catch {
+            self.logger.error("gRPC server error", metadata: ["error": "\(error)"])
+            throw error
         }
     }
     
@@ -151,12 +130,6 @@ public actor ActorEdgeService: Service {
         // Note: GRPCServer in grpc-swift 2.0 doesn't have explicit stop method
         // It will be stopped when the task is cancelled
         logger.info("Cancelling gRPC server task")
-        
-        // Stop the protocol-independent server
-        if let server = protocolIndependentServer {
-            try await server.shutdown()
-            logger.info("Protocol-independent server stopped")
-        }
         
         // Shutdown event loop group
         if let elg = eventLoopGroup {

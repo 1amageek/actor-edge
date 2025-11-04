@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+import ActorRuntime
 import Distributed
 import Foundation
 import Logging
@@ -18,32 +19,36 @@ import Metrics
 
 /// The distributed actor system implementation for ActorEdge.
 ///
-/// This system provides a protocol-independent distributed actor runtime
-/// that can work with any transport layer (gRPC, TCP, etc.).
+/// This system provides a gRPC-based distributed actor runtime
+/// leveraging ActorRuntime's transport-agnostic primitives.
 public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
     public typealias ActorID = ActorEdgeID
-    public typealias SerializationRequirement = Codable & Sendable
-    public typealias InvocationEncoder = ActorEdgeInvocationEncoder
-    public typealias InvocationDecoder = ActorEdgeInvocationDecoder
-    public typealias ResultHandler = ActorEdgeResultHandler
-    
+    // Match ActorRuntime's serialization requirement (Codable only)
+    // Note: Sendable is enforced by distributed actor isolation, not serialization
+    public typealias SerializationRequirement = Codable
+
+    // Use ActorRuntime's codec implementations
+    public typealias InvocationEncoder = CodableInvocationEncoder
+    public typealias InvocationDecoder = CodableInvocationDecoder
+    public typealias ResultHandler = CodableResultHandler
+
     /// Configuration for ActorEdgeSystem
     public struct Configuration: Sendable {
         /// Metrics configuration
         public let metrics: MetricsConfiguration
-        
+
         /// Tracing configuration
         public let tracing: TracingConfiguration
-        
+
         /// Request timeout
         public let timeout: TimeInterval
-        
+
         /// Maximum retry attempts
         public let maxRetries: Int
-        
+
         /// Logger label
         public let loggerLabel: String
-        
+
         public init(
             metrics: MetricsConfiguration = .default,
             tracing: TracingConfiguration = .disabled,
@@ -57,90 +62,81 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
             self.maxRetries = maxRetries
             self.loggerLabel = loggerLabel
         }
-        
+
         /// Default configuration
         public static let `default` = Configuration()
     }
-    
-    /// Protocol-independent transport layer
-    private let transport: MessageTransport?
-    
-    /// Invocation processor for envelope handling
-    private let invocationProcessor: DistributedInvocationProcessor
-    
+
+    /// Transport layer (ActorRuntime's DistributedTransport)
+    private let transport: DistributedTransport?
+
+    /// Actor registry from ActorRuntime
+    private let registry: ActorRuntime.ActorRegistry
+
     /// System configuration
     private let configuration: Configuration
-    
+
     private let logger: Logger
     public let isServer: Bool
-    public let registry: ActorRegistry?
-    
-    /// The serialization system for this actor system
-    public let serialization: SerializationSystem
-    
+
     /// Pre-assigned IDs for actors (thread-safe)
     private let preAssignedIDsStorage = PreAssignedIDStorage()
-    
+
     // Metrics
     private let distributedCallsCounter: Counter
     private let methodInvocationsCounter: Counter
     private let metricNames: MetricNames
-    
+
     /// Create a client-side actor system with a transport
-    public init(transport: MessageTransport, configuration: Configuration = .default) {
+    public init(transport: DistributedTransport, configuration: Configuration = .default) {
         self.transport = transport
         self.configuration = configuration
         self.logger = Logger(label: configuration.loggerLabel)
         self.isServer = false
-        self.registry = ActorRegistry() // Clients can also have local actors
-        self.serialization = SerializationSystem()
-        
-        // Initialize metrics first
+        self.registry = ActorRuntime.ActorRegistry()
+
+        // Initialize metrics
         self.metricNames = MetricNames(namespace: configuration.metrics.namespace)
         self.distributedCallsCounter = Counter(label: metricNames.distributedCallsTotal)
         self.methodInvocationsCounter = Counter(label: metricNames.methodInvocationsTotal)
-        
-        // Initialize invocation processor after all other properties
-        self.invocationProcessor = DistributedInvocationProcessor(serialization: self.serialization)
     }
-    
+
     /// Create a server-side actor system without transport
     public init(configuration: Configuration = .default) {
         self.transport = nil
         self.configuration = configuration
         self.logger = Logger(label: configuration.loggerLabel)
         self.isServer = true
-        self.registry = ActorRegistry()
-        self.serialization = SerializationSystem()
-        
-        // Initialize metrics first
+        self.registry = ActorRuntime.ActorRegistry()
+
+        // Initialize metrics
         self.metricNames = MetricNames(namespace: configuration.metrics.namespace)
         self.distributedCallsCounter = Counter(label: metricNames.distributedCallsTotal)
         self.methodInvocationsCounter = Counter(label: metricNames.methodInvocationsTotal)
-        
-        // Initialize invocation processor after all other properties
-        self.invocationProcessor = DistributedInvocationProcessor(serialization: self.serialization)
     }
-    
-    public func resolve<Act>(id: ActorID, as actorType: Act.Type) throws -> Act? 
+
+    public func resolve<Act>(id: ActorID, as actorType: Act.Type) throws -> Act?
         where Act: DistributedActor, Act.ID == ActorID {
-        // First check if we have this actor locally (both client and server can have local actors)
-        if let registry = registry {
-            if let actor = registry.find(id: id) {
-                // Try to cast to the requested type
-                guard let typedActor = actor as? Act else {
-                    throw ActorEdgeError.actorTypeMismatch(id, expected: "\(Act.self)", actual: "\(type(of: actor))")
-                }
-                return typedActor
+        // Convert ActorEdgeID to String for ActorRuntime registry
+        let actorIDString = id.description
+
+        // Check if we have this actor locally
+        if let actor = registry.find(id: actorIDString) {
+            // Try to cast to the requested type
+            guard let typedActor = actor as? Act else {
+                throw RuntimeError.executionFailed(
+                    "Actor type mismatch for \(id): expected \(Act.self), actual \(type(of: actor))",
+                    underlying: "Type mismatch"
+                )
             }
+            return typedActor
         }
-        
+
         // If not found locally, return nil to let the runtime create a remote proxy
-        // This allows the @Resolvable macro to generate the appropriate stub
         return nil
     }
-    
-    public func assignID<Act>(_ actorType: Act.Type) -> ActorID 
+
+    public func assignID<Act>(_ actorType: Act.Type) -> ActorID
         where Act: DistributedActor {
         // Check if we have a pre-assigned ID for this actor type
         if let preAssignedID = preAssignedIDsStorage.getNext() {
@@ -149,45 +145,40 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
         // Otherwise, generate a new ID
         return ActorEdgeID()
     }
-    
+
     /// Sets pre-assigned IDs for actors
     public func setPreAssignedIDs(_ ids: [String]) {
         preAssignedIDsStorage.setIDs(ids)
     }
-    
-    public func actorReady<Act>(_ actor: Act) 
+
+    public func actorReady<Act>(_ actor: Act)
         where Act: DistributedActor {
         logger.info("Actor ready", metadata: [
             "actorType": "\(Act.self)",
             "actorID": "\(actor.id)"
         ])
-        
-        // Register actor in registry if available (both client and server can have actors)
-        if let registry = registry {
-            // Check if the actor's ID type is ActorEdgeID
-            if let actorID = actor.id as? ActorEdgeID {
-                registry.register(actor, id: actorID)
-            }
+
+        // Register actor in ActorRuntime registry
+        if let actorID = actor.id as? ActorEdgeID {
+            registry.register(actor, id: actorID.description)
         }
     }
-    
+
     public func resignID(_ id: ActorID) {
         logger.debug("Actor resigned", metadata: [
             "actorID": "\(id)"
         ])
-        
-        // Unregister actor from registry if available
-        if let registry = registry {
-            registry.unregister(id: id)
-        }
+
+        // Unregister actor from registry
+        registry.unregister(id: id.description)
     }
-    
+
     public func makeInvocationEncoder() -> InvocationEncoder {
-        ActorEdgeInvocationEncoder(system: self)
+        CodableInvocationEncoder()
     }
-    
+
     // MARK: - Remote Call Execution
-    
+
     public func remoteCall<Act, Err, Res>(
         on actor: Act,
         target: Distributed.RemoteCallTarget,
@@ -200,47 +191,44 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
           Err: Error,
           Res: SerializationRequirement {
         guard let transport = transport else {
-            throw ActorEdgeError.transportError("No transport configured")
+            throw RuntimeError.transportFailed("No transport configured")
         }
-        
+
         // Update metrics
         distributedCallsCounter.increment()
-        
-        // Ensure invocation is finalized
-        if invocation.state == .recording {
-            try invocation.doneRecording()
-        }
-        
-        // Create envelope from invocation
-        let envelope = try invocationProcessor.createInvocationEnvelope(
-            recipient: actor.id,
-            target: target,
-            encoder: invocation,
-            traceContext: ServiceContext.current?.baggage ?? [:]
+
+        // Create InvocationEnvelope from encoder
+        // Note: actor.id is already ActorEdgeID since Act.ID == ActorID
+        let invocationEnvelope = try invocation.makeInvocationEnvelope(
+            recipientID: actor.id.description,
+            senderID: nil
         )
-        
-        // Send envelope and wait for response
-        guard let responseEnvelope = try await transport.send(envelope) else {
-            throw ActorEdgeError.transportError("No response received")
-        }
-        
+
+        // Send through transport and get response
+        let responseEnvelope = try await transport.sendInvocation(invocationEnvelope)
+
         // Extract result from response
-        let result = try invocationProcessor.extractResult(from: responseEnvelope)
-        
-        switch result {
-        case .success(let serialized):
-            return try serialization.deserialize(serialized, as: Res.self)
+        switch responseEnvelope.result {
+        case .success(let data):
+            // Deserialize the result
+            let decoder = JSONDecoder()
+            return try decoder.decode(Res.self, from: data)
+
         case .void:
-            throw ActorEdgeError.invocationError("Unexpected void response for non-void call")
-        case .error(let serializedError):
-            // Try to deserialize the error
-            if throwing == Never.self {
-                throw ActorEdgeError.invocationError("Unexpected error for non-throwing call")
-            }
-            throw ActorEdgeError.remoteCallError(serializedError.message)
+            throw RuntimeError.executionFailed(
+                "Unexpected void response for non-void call",
+                underlying: "Protocol mismatch"
+            )
+
+        case .failure(let error):
+            // Re-throw the remote error
+            throw RuntimeError.executionFailed(
+                "Remote call failed: \(error)",
+                underlying: "\(error)"
+            )
         }
     }
-    
+
     public func remoteCallVoid<Act, Err>(
         on actor: Act,
         target: Distributed.RemoteCallTarget,
@@ -250,62 +238,59 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
     where Act: DistributedActor,
           Act.ID == ActorID,
           Err: Error {
-        
+
         guard let transport = transport else {
-            throw ActorEdgeError.transportError("No transport configured")
+            throw RuntimeError.transportFailed("No transport configured")
         }
-        
+
         // Update metrics
         distributedCallsCounter.increment()
-        
-        // Ensure invocation is finalized
-        if invocation.state == .recording {
-            try invocation.doneRecording()
-        }
-        
-        // Create envelope from invocation
-        let envelope = try invocationProcessor.createInvocationEnvelope(
-            recipient: actor.id,
-            target: target,
-            encoder: invocation,
-            traceContext: ServiceContext.current?.baggage ?? [:]
+
+        // Create InvocationEnvelope from encoder
+        // Note: actor.id is already ActorEdgeID since Act.ID == ActorID
+        let invocationEnvelope = try invocation.makeInvocationEnvelope(
+            recipientID: actor.id.description,
+            senderID: nil
         )
-        
-        // Send envelope and wait for response
-        guard let responseEnvelope = try await transport.send(envelope) else {
-            throw ActorEdgeError.transportError("No response received")
-        }
-        
+
+        // Send through transport and get response
+        let responseEnvelope = try await transport.sendInvocation(invocationEnvelope)
+
         // Extract result from response
-        let result = try invocationProcessor.extractResult(from: responseEnvelope)
-        
-        switch result {
+        switch responseEnvelope.result {
         case .void:
             // Expected for void return
             return
+
         case .success(_):
-            throw ActorEdgeError.invocationError("Unexpected non-void response for void call")
-        case .error(let serializedError):
-            // Try to deserialize the error
-            if throwing == Never.self {
-                throw ActorEdgeError.invocationError("Unexpected error for non-throwing call")
-            }
-            throw ActorEdgeError.remoteCallError(serializedError.message)
+            throw RuntimeError.executionFailed(
+                "Unexpected non-void response for void call",
+                underlying: "Protocol mismatch"
+            )
+
+        case .failure(let error):
+            // Re-throw the remote error
+            throw RuntimeError.executionFailed(
+                "Remote call failed: \(error)",
+                underlying: "\(error)"
+            )
         }
     }
-    
+
     // MARK: - Server-side Actor Management
-    
+
     /// Find an actor by ID
-    public func findActor(id: ActorID) -> (any DistributedActor)? {
-        guard let registry = registry else {
-            return nil
-        }
-        return registry.find(id: id)
+    public func findActor(id: ActorEdgeID) -> (any DistributedActor)? {
+        return registry.find(id: id.description)
     }
-    
+
+    /// Get the ActorRuntime registry (for server integration)
+    public func getRegistry() -> ActorRuntime.ActorRegistry {
+        return registry
+    }
+
     // MARK: - Logging
-    
+
     /// Log a message (internal use)
     internal func log(_ message: String, level: Logger.Level = .debug) {
         logger.log(level: level, "\(message)")
@@ -323,7 +308,7 @@ extension ServiceContext {
         // 1. Use a custom baggage type that tracks all key-value pairs
         // 2. Or maintain a registry of known context keys
         // 3. Or use the distributed tracing baggage APIs
-        
+
         // For now, return empty dictionary
         // Tests should be updated to not rely on automatic context propagation
         return [:]
@@ -336,13 +321,13 @@ extension ServiceContext {
 private final class PreAssignedIDStorage: @unchecked Sendable {
     private let lock = NSLock()
     private var ids: [String] = []
-    
+
     func setIDs(_ newIDs: [String]) {
         lock.lock()
         defer { lock.unlock() }
         ids = newIDs
     }
-    
+
     func getNext() -> String? {
         lock.lock()
         defer { lock.unlock() }

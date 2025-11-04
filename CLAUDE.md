@@ -5,20 +5,46 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ### Build
+```bash
 swift build
+```
 
 ### Test
+```bash
 swift test
+```
 
 ### Run specific test
+```bash
 swift test --filter TestName
-
-### Generate Protobuf files
-SwiftProtobufPlugin automatically generates Swift code during build
-Configuration: Sources/ActorEdgeCore/swift-protobuf-config.json
+```
 
 ### Clean build
+```bash
 swift package clean
+```
+
+### Opening in Xcode
+**IMPORTANT**: If you encounter Xcode build errors about missing files (protoc-gen-swift, .proto files), follow these steps:
+
+1. Close Xcode completely
+2. Clean all caches:
+```bash
+# Remove Swift PM cache
+rm -rf .swiftpm
+
+# Remove Xcode derived data
+rm -rf ~/Library/Developer/Xcode/DerivedData/actor-edge-*
+
+# Resolve dependencies fresh
+swift package resolve
+```
+3. Open in Xcode:
+```bash
+open Package.swift
+```
+
+**Why this is necessary**: Xcode caches build settings in its derived data directory. When Package.swift changes (e.g., removing plugins), the cache may retain old settings. Cleaning forces Xcode to regenerate from the current Package.swift.
 
 ## Architecture Overview
 
@@ -1213,3 +1239,156 @@ struct ObservableServer: Server {
    - 本番環境ではTLS必須
    - mTLSでクライアント認証
    - ミドルウェアで認可実装
+
+## grpc-swift-2 API Usage
+
+ActorEdgeは[grpc-swift-2](https://github.com/grpc/grpc-swift-2)を使用しています。
+
+### RegistrableRPCService の実装
+
+サーバー側のRPCハンドラーを実装するには、`RegistrableRPCService`プロトコルに準拠します：
+
+```swift
+import GRPCCore
+import GRPCProtobuf
+
+struct MyService: RegistrableRPCService {
+    func registerMethods<Transport: ServerTransport>(with router: inout RPCRouter<Transport>) {
+        router.registerHandler(
+            forMethod: MethodDescriptor(
+                service: ServiceDescriptor(fullyQualifiedService: "package.ServiceName"),
+                method: "MethodName"
+            ),
+            deserializer: ProtobufDeserializer<InputMessage>(),
+            serializer: ProtobufSerializer<OutputMessage>(),
+            handler: { request, context in
+                try await self.handleMethod(request: request, context: context)
+            }
+        )
+    }
+
+    private func handleMethod(
+        request: StreamingServerRequest<InputMessage>,
+        context: ServerContext
+    ) async throws -> StreamingServerResponse<OutputMessage> {
+        // 実装
+    }
+}
+```
+
+### StreamingServerRequest と StreamingServerResponse
+
+#### StreamingServerRequest
+- **型**: `StreamingServerRequest<Message: Sendable>`
+- **用途**: サーバーが受信するストリーミングリクエスト
+- **プロパティ**:
+  - `metadata`: クライアントからの初期メタデータ
+  - `messages`: `RPCAsyncSequence<Message>` - メッセージのストリーム
+
+#### StreamingServerResponse
+- **型**: `StreamingServerResponse<Message: Sendable>`
+- **用途**: サーバーからのストリーミングレスポンス
+- **プロパティ**:
+  - `accepted`: RPCが受理されたか拒否されたかの`Result`
+  - `metadata`: クライアントに送信する初期メタデータ
+  - `producer`: メッセージを書き込むクロージャ
+
+### ServerRequest との変換
+
+#### Unary RPC（単一リクエスト/レスポンス）の場合
+
+```swift
+// StreamingServerRequest → ServerRequest（単一メッセージを期待）
+let singleRequest = try await ServerRequest(stream: streamingRequest)
+
+// ServerResponse → StreamingServerResponse（単一メッセージを返す）
+let response = StreamingServerResponse(single: singleResponse)
+```
+
+**例**: ActorEdgeのDistributedActorServiceでは：
+
+```swift
+private func handleRemoteCall(
+    request: StreamingServerRequest<ActorEdgeProtoInvocationEnvelope>,
+    context: ServerContext
+) async throws -> StreamingServerResponse<ActorEdgeProtoResponseEnvelope> {
+    // ストリームから単一メッセージを取得
+    guard let protoEnvelope = try await request.messages.first(where: { _ in true }) else {
+        throw RuntimeError.invalidEnvelope("No invocation envelope received")
+    }
+
+    // 処理...
+    let responseEnvelope = try await executeInvocation(invocationEnvelope)
+    let protoResponse = responseEnvelope.toProto()
+
+    // 単一レスポンスを返す
+    return StreamingServerResponse(single: protoResponse)
+}
+```
+
+### RPC タイプ別の使用パターン
+
+1. **Unary RPC**: `ServerRequest` → `ServerResponse`
+   ```swift
+   func get(_ request: ServerRequest<Message>) async throws -> ServerResponse<Message>
+   ```
+
+2. **Client Streaming**: `StreamingServerRequest` → `ServerResponse`
+   ```swift
+   func collect(_ request: StreamingServerRequest<Message>) async throws -> ServerResponse<Message>
+   ```
+
+3. **Server Streaming**: `ServerRequest` → `StreamingServerResponse`
+   ```swift
+   func expand(_ request: ServerRequest<Message>) async throws -> StreamingServerResponse<Message>
+   ```
+
+4. **Bidirectional Streaming**: `StreamingServerRequest` → `StreamingServerResponse`
+   ```swift
+   func update(_ request: StreamingServerRequest<Message>) async throws -> StreamingServerResponse<Message>
+   ```
+
+### 重要なポイント
+
+1. **ProtobufSerializer/Deserializer**: protobufメッセージの型を指定して使用
+   ```swift
+   ProtobufDeserializer<YourInputMessage>()
+   ProtobufSerializer<YourOutputMessage>()
+   ```
+
+2. **Generic Transport**: `registerMethods`は`<Transport: ServerTransport>`で汎用的に実装
+   - これにより異なるトランスポート実装（HTTP/2、HTTP/3等）で使用可能
+
+3. **StreamingServiceProtocol**: 最も低レベルで柔軟なプロトコル
+   - すべてのRPCタイプを双方向ストリーミングとして扱う
+   - `StreamingServerRequest`と`StreamingServerResponse`を使用
+
+4. **エラーハンドリング**: `RPCError`をスローしてクライアントにエラーを伝える
+   ```swift
+   throw RPCError(code: .notFound, message: "Actor not found")
+   ```
+
+### ActorEdgeでの使用例
+
+ActorEdgeの`DistributedActorService`は以下のように実装されています：
+
+```swift
+public struct DistributedActorService: RegistrableRPCService {
+    public func registerMethods<Transport: ServerTransport>(with router: inout RPCRouter<Transport>) {
+        router.registerHandler(
+            forMethod: MethodDescriptor(
+                service: ServiceDescriptor(fullyQualifiedService: "DistributedActor"),
+                method: "RemoteCall"
+            ),
+            deserializer: ProtobufDeserializer<ActorEdgeProtoInvocationEnvelope>(),
+            serializer: ProtobufSerializer<ActorEdgeProtoResponseEnvelope>(),
+            handler: { request, context in
+                try await self.handleRemoteCall(request: request, context: context)
+            }
+        )
+    }
+}
+```
+
+これはActorRuntimeの`InvocationEnvelope`/`ResponseEnvelope`をprotobufメッセージに変換し、
+gRPC経由で送受信するための実装です。
