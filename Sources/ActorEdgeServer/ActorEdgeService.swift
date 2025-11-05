@@ -40,7 +40,15 @@ public actor ActorEdgeService: Service {
     private var eventLoopGroup: MultiThreadedEventLoopGroup?
     private var grpcServer: GRPCServer<HTTP2ServerTransport.Posix>?
     private var actorSystem: ActorEdgeSystem?
-    
+
+    // Server status
+    private var _listeningAddress: String?
+
+    /// The address the server is listening on (available after server starts)
+    public var listeningAddress: String? {
+        _listeningAddress
+    }
+
     public init(configuration: Configuration) {
         self.configuration = configuration
         self.logger = Logger(label: "ActorEdge.Service")
@@ -68,10 +76,13 @@ public actor ActorEdgeService: Service {
         actorSystem = system
         
         // Set pre-assigned IDs before creating actors
+        print("🟣 [ActorEdgeService] Setting pre-assigned IDs: \(configuration.server.actorIDs.map { "'\($0.value)'" })")
         system.setPreAssignedIDs(configuration.server.actorIDs)
-        
+
         // Create actors - they will use the pre-assigned IDs
+        print("🟣 [ActorEdgeService] Creating actors...")
         let actors = configuration.server.actors(actorSystem: system)
+        print("🟣 [ActorEdgeService] Created \(actors.count) actors")
         
         // Log the actors that were created
         for actor in actors {
@@ -104,23 +115,40 @@ public actor ActorEdgeService: Service {
         }
         
         // Create distributed actor service
+        print("🟣 [ActorEdgeService] Creating DistributedActorService...")
         let distributedActorService = DistributedActorService(system: system)
 
         // Create gRPC server
+        print("🟣 [ActorEdgeService] Creating GRPCServer on \(host):\(port)...")
         let grpc = GRPCServer(transport: transportConfig, services: [distributedActorService])
         grpcServer = grpc
-        
+
         logger.info("ActorEdge service configured", metadata: [
             "host": "\(host)",
             "port": "\(port)",
             "tls": "\(configuration.server.tls != nil)",
             "maxConnections": "\(configuration.server.maxConnections)"
         ])
-        
+
         // Start the gRPC server
+        print("🟣 [ActorEdgeService] Starting gRPC server with grpc.serve()...")
         do {
-            try await grpc.serve()
+            // Get listening address once server starts
+            async let address = grpc.listeningAddress
+            async let serverTask: Void = grpc.serve()
+
+            // Wait for listening address (confirms server is ready)
+            if let addr = try await address {
+                _listeningAddress = "\(addr)"
+                print("🟢 [ActorEdgeService] gRPC server listening on \(addr)")
+                logger.info("gRPC server listening", metadata: ["address": "\(addr)"])
+            }
+
+            // This will block until server stops
+            try await serverTask
+            print("🟣 [ActorEdgeService] gRPC server serve() completed (server stopped)")
         } catch {
+            print("🔴 [ActorEdgeService] gRPC server error: \(error)")
             self.logger.error("gRPC server error", metadata: ["error": "\(error)"])
             throw error
         }

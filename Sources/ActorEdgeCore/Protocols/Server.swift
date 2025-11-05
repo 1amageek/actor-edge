@@ -71,7 +71,7 @@ public protocol Server: Sendable {
     
     /// Provides well-known IDs for actors (optional)
     /// If not implemented, actors will be assigned IDs like "actor-0", "actor-1", etc.
-    var actorIDs: [String] { get }
+    var actorIDs: [ActorEdgeID] { get }
     
     // MARK: - Required Configuration
     
@@ -107,7 +107,7 @@ public extension Server {
     }
 
     /// Actor IDs for pre-registered actors (empty by default)
-    var actorIDs: [String] { [] }
+    var actorIDs: [ActorEdgeID] { [] }
 
     /// Server port (default: 8000, similar to Deno)
     var port: Int { 8000 }

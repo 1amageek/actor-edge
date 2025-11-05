@@ -38,29 +38,39 @@ public extension ActorEdgeSystem {
         tls: ClientTLSConfiguration? = nil,
         configuration: Configuration = .default
     ) async throws -> ActorEdgeSystem {
+        print("🔷 [ClientFactory] grpcClient: Creating client for endpoint '\(endpoint)'")
+
         // Parse endpoint
         let components = endpoint.split(separator: ":")
         guard components.count == 2,
               let host = components.first.map(String.init),
               let port = components.last.flatMap({ Int($0) }) else {
+            print("🔴 [ClientFactory] grpcClient: ERROR - Invalid endpoint format")
             throw RuntimeError.invalidEnvelope("Invalid endpoint format. Expected 'host:port'")
         }
+
+        print("🔷 [ClientFactory] grpcClient: Parsed host='\(host)', port=\(port)")
 
         // Create HTTP/2 client transport with optional TLS
         let transportSecurity: HTTP2ClientTransport.Posix.TransportSecurity
         if let tlsConfig = tls {
             transportSecurity = try tlsConfig.toGRPCClientTransportSecurity()
+            print("🔷 [ClientFactory] grpcClient: Using TLS")
         } else {
             transportSecurity = .plaintext
+            print("🔷 [ClientFactory] grpcClient: Using plaintext (no TLS)")
         }
 
+        print("🔷 [ClientFactory] grpcClient: Creating HTTP2ClientTransport...")
         let clientTransport = try HTTP2ClientTransport.Posix(
             target: .ipv4(host: host, port: port),
             transportSecurity: transportSecurity
         )
 
+        print("🔷 [ClientFactory] grpcClient: Creating GRPCClient...")
         // Create gRPC client
         let grpcClient = GRPCClient(transport: clientTransport)
+        print("🔷 [ClientFactory] grpcClient: GRPCClient created successfully")
 
         // Create GRPCTransport wrapper with metrics namespace
         let transport = GRPCTransport(

@@ -127,6 +127,7 @@ public protocol TestActor: DistributedActor where ActorSystem == ActorEdgeSystem
     distributed func complexOperation(_ data: ComplexMessage) async throws -> ComplexMessage
     distributed func throwsError() async throws
     distributed func throwsSpecificError(_ error: TestError) async throws
+    distributed func throwValidationError() async throws
     distributed func voidMethod() async throws
     distributed func getCounter() async throws -> Int
     distributed func incrementCounter() async throws -> Int
@@ -175,7 +176,11 @@ public distributed actor TestActorImpl: TestActor {
     public distributed func throwsSpecificError(_ error: TestError) async throws {
         throw error
     }
-    
+
+    public distributed func throwValidationError() async throws {
+        throw TestError.validationError(field: "test", message: "Test validation failed")
+    }
+
     public distributed func voidMethod() async throws {
         counter += 1
     }

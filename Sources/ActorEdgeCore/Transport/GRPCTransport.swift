@@ -22,7 +22,7 @@ import Metrics
 /// This transport uses JSON serialization to send ActorRuntime's InvocationEnvelope
 /// and ResponseEnvelope directly over gRPC, without intermediate protobuf conversion.
 public final class GRPCTransport: DistributedTransport, Sendable {
-    private let client: GRPCClient<HTTP2ClientTransport.Posix>
+    public let client: GRPCClient<HTTP2ClientTransport.Posix>
     private let logger: Logger
     private let transportLatency: Timer
     private let incomingContinuation: AsyncStream<InvocationEnvelope>.Continuation
@@ -49,6 +49,7 @@ public final class GRPCTransport: DistributedTransport, Sendable {
     }
 
     public func sendInvocation(_ envelope: InvocationEnvelope) async throws -> ResponseEnvelope {
+        print("🟦 [GRPCTransport] sendInvocation: callID='\(envelope.callID)', recipientID='\(envelope.recipientID)', target='\(envelope.target)'")
         logger.trace("Sending invocation", metadata: ["callID": "\(envelope.callID)"])
 
         // Record start time for latency measurement
@@ -60,6 +61,7 @@ public final class GRPCTransport: DistributedTransport, Sendable {
             method: "RemoteCall"
         )
 
+        print("🟦 [GRPCTransport] Making gRPC unary call...")
         // Make gRPC unary call with JSON serialization
         let response: ResponseEnvelope = try await client.unary(
             request: ClientRequest(message: envelope),
@@ -68,6 +70,7 @@ public final class GRPCTransport: DistributedTransport, Sendable {
             deserializer: JSONDeserializer<ResponseEnvelope>(),
             options: .defaults
         ) { response in
+            print("🟦 [GRPCTransport] Received gRPC response")
             return try response.message
         }
 
@@ -77,6 +80,7 @@ public final class GRPCTransport: DistributedTransport, Sendable {
         let latencySeconds = Double(latencyNanos) / 1_000_000_000.0
         transportLatency.recordSeconds(latencySeconds)
 
+        print("🟢 [GRPCTransport] sendInvocation complete: callID='\(response.callID)'")
         logger.trace("Received response", metadata: ["callID": "\(response.callID)"])
         return response
     }

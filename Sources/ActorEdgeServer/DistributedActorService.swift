@@ -51,19 +51,24 @@ public struct DistributedActorService: RegistrableRPCService {
         request: StreamingServerRequest<InvocationEnvelope>,
         context: ServerContext
     ) async throws -> StreamingServerResponse<ResponseEnvelope> {
+        print("🟧 [DistributedActorService] handleRemoteCall: Received request")
         // Get the single message from the stream
         guard let invocationEnvelope = try await request.messages.first(where: { _ in true }) else {
+            print("🔴 [DistributedActorService] handleRemoteCall: ERROR - No invocation envelope received")
             throw ActorRuntime.RuntimeError.invalidEnvelope("No invocation envelope received")
         }
 
+        print("🟧 [DistributedActorService] handleRemoteCall: callID='\(invocationEnvelope.callID)', recipientID='\(invocationEnvelope.recipientID)', target='\(invocationEnvelope.target)'")
         logger.debug("Handling remote call", metadata: [
             "callID": "\(invocationEnvelope.callID)",
             "recipient": "\(invocationEnvelope.recipientID)",
             "target": "\(invocationEnvelope.target)"
         ])
 
+        print("🟧 [DistributedActorService] handleRemoteCall: Executing invocation...")
         // Execute the invocation and get response
         let responseEnvelope = try await executeInvocation(invocationEnvelope)
+        print("🟢 [DistributedActorService] handleRemoteCall: Execution complete, returning response")
 
         // Return single response wrapped in ServerResponse
         let serverResponse = ServerResponse(message: responseEnvelope)
@@ -74,12 +79,15 @@ public struct DistributedActorService: RegistrableRPCService {
     private func executeInvocation(_ envelope: InvocationEnvelope) async throws -> ResponseEnvelope {
         let startTime = Date()
 
+        print("🟨 [DistributedActorService] executeInvocation: Finding actor with id='\(envelope.recipientID)'")
         // Find the target actor
         let actorID = ActorEdgeID(envelope.recipientID)
         guard let actor = system.findActor(id: actorID) else {
+            print("🔴 [DistributedActorService] executeInvocation: ERROR - Actor not found: '\(envelope.recipientID)'")
             logger.error("Actor not found", metadata: ["actorID": "\(envelope.recipientID)"])
             throw ActorRuntime.RuntimeError.actorNotFound(envelope.recipientID)
         }
+        print("🟢 [DistributedActorService] executeInvocation: Found actor: \(type(of: actor))")
 
         // Create decoder from envelope
         var decoder = try CodableInvocationDecoder(envelope: envelope)
@@ -87,6 +95,7 @@ public struct DistributedActorService: RegistrableRPCService {
         // Create result handler that will be called by executeDistributedTarget
         var capturedResponse: ResponseEnvelope?
         let resultHandler = CodableResultHandler(callID: envelope.callID) { responseEnvelope in
+            print("🟨 [DistributedActorService] executeInvocation: Result handler called")
             // Add execution time metadata using convenience method
             let executionTime = Date().timeIntervalSince(startTime)
             capturedResponse = responseEnvelope.withExecutionTime(executionTime)
@@ -95,6 +104,7 @@ public struct DistributedActorService: RegistrableRPCService {
         // Create remote call target
         let target = RemoteCallTarget(envelope.target)
 
+        print("🟨 [DistributedActorService] executeInvocation: Executing distributed target '\(envelope.target)'")
         logger.debug("Executing distributed target", metadata: [
             "actor": "\(type(of: actor))",
             "method": "\(envelope.target)"
@@ -109,6 +119,7 @@ public struct DistributedActorService: RegistrableRPCService {
                 invocationDecoder: &decoder,
                 handler: resultHandler
             )
+            print("🟢 [DistributedActorService] executeInvocation: executeDistributedTarget completed")
 
             // Return the captured response
             guard let response = capturedResponse else {

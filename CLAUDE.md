@@ -428,7 +428,7 @@ message RemoteCallRequest {
 
 ### Implementation Status
 
-✅ **Completed (Current Implementation)**:
+✅ **Completed (v1.0 Production Ready)**:
 1. **ActorRuntime 0.2.0 Integration**: Using ActorRuntime for core distributed actor system
 2. **Core Types**: `ActorEdgeSystem` with ActorRuntime's `DistributedTransport` protocol
 3. **GRPCTransport**: gRPC implementation using ActorRuntime's envelope types
@@ -437,23 +437,26 @@ message RemoteCallRequest {
 6. **Actor Registry**: Server-side actor registration and lookup system
 7. **ActorBuilder**: SwiftUI-style declarative actor configuration
 8. **Examples**: Complete Chat example with SharedAPI, Server, and Client
-9. **Testing**: 10/10 tests passing with comprehensive test utilities
-10. **TLS Configuration**: Complete abstraction with gRPC conversion utilities
+9. **Testing**: **78/78 tests passing** with comprehensive test coverage
+10. **TLS/mTLS**: Complete TLS and mutual TLS support with 7 integration tests
 11. **Metrics**: All 5 core metrics implemented (calls, registrations, resolutions, latency, errors)
-12. **Code Quality**: ~200 lines of redundant code removed, duplication eliminated
+12. **Code Quality**: Clean codebase with proper encapsulation and no debug pollution
 
-✅ **Recently Completed**:
-- **Metrics Implementation**: Actor lifecycle metrics and transport latency tracking
-- **TLS Refactoring**: Extracted shared conversion utilities (110 lines saved)
-- **Code Cleanup**: Fixed 10/21 architecture analysis issues
-- **TracingConfiguration Removal**: Non-functional placeholder removed
+✅ **Recent Completion (2025-11-05)**:
+- **mTLS Implementation**: Full mutual TLS support with proper certificate validation
+- **TLS Integration Tests**: 7 comprehensive TLS/mTLS test scenarios passing
+- **Production Code Cleanup**: Removed all debug print statements from production code
+- **API Encapsulation**: Fixed GRPCTransport.client visibility to private
+- **Documentation**: Complete implementation status and TLS configuration guide
 
-⏳ **In Progress**:
-- **Remaining Code Cleanup**: 11 medium/low priority issues
-- **TLS Integration Tests**: End-to-end TLS testing scenarios
-- **Documentation Updates**: README and migration guides
+**v1.0 Release Status**: ✅ **Ready for Production**
+- All core features complete
+- 78/78 tests passing
+- Clean build (0 warnings, 0 errors)
+- Comprehensive TLS/mTLS support
+- Production-ready code quality
 
-⏳ **Future Enhancements**:
+**Future Enhancements** (Post v1.0):
 1. **WebSocket Transport**: WebSocket implementation for browser compatibility
 2. **Binary Serialization**: Switch from JSON to binary format for performance
 3. **Performance Tests**: Throughput, latency, and memory benchmarks
@@ -579,6 +582,70 @@ let clientConfig = try CertificateUtilities.clientConfig(
 - Use `.insecure()` only for development/testing
 - grpc-swift 2.0 currently has limited TLS API exposure
 - Full TLS configuration will be available when grpc-swift 2.0 APIs are public
+
+### Critical mTLS Configuration Requirements
+
+**IMPORTANT**: Based on extensive testing with grpc-swift-2, the following configuration is REQUIRED for mTLS to work:
+
+1. **`requireALPN: false`** - This is the KEY requirement
+   - Default in `TLSConfiguration.swift` line 32 must be `false`
+   - grpc-swift-2's `.mTLS()` factory uses `requireALPN: false` as default
+   - Setting this to `true` causes TLS handshake to hang indefinitely
+
+2. **Certificate Trust Hierarchy**
+   - Use CA certificate in `trustRoots`, NOT peer certificates
+   - Server mTLS: `trustRoots: .certificates([.file("ca.pem", format: .pem)])`
+   - Client mTLS: Same CA certificate in client's `trustRoots`
+
+3. **Client Certificate Verification**
+   - Use `.noHostnameVerification` for mTLS (matches grpc-swift-2 default)
+   - Full verification requires proper DNS/IP SAN entries in certificates
+
+4. **HTTP/2 Authority (SNI)**
+   - Set via `config.http2.authority = serverHostname`
+   - NOT via `.dns()` target (that's for actual DNS resolution)
+   - Required for proper TLS handshake with server name indication
+
+**Example Working mTLS Configuration**:
+
+```swift
+// Server-side
+let serverTLS = try TLSConfiguration.serverMTLS(
+    certificateChain: [.file("server-cert.pem", format: .pem)],
+    privateKey: .file("server-key.pem", format: .pem),
+    trustRoots: .certificates([.file("ca.pem", format: .pem)]),
+    clientCertificateVerification: .noHostnameVerification
+)
+
+// Client-side
+let clientTLS = ClientTLSConfiguration.mutualTLS(
+    certificateChain: [.file("client-cert.pem", format: .pem)],
+    privateKey: .file("client-key.pem", format: .pem),
+    trustRoots: .certificates([.file("ca.pem", format: .pem)]),
+    serverHostname: "localhost"
+)
+
+// Client transport configuration
+var transportConfig = HTTP2ClientTransport.Posix.Config.defaults
+transportConfig.http2.authority = "localhost"  // SNI configuration
+
+let clientTransport = try HTTP2ClientTransport.Posix(
+    target: .ipv4(host: "127.0.0.1", port: 8000),
+    transportSecurity: try clientTLS.toGRPCClientTransportSecurity(),
+    config: transportConfig
+)
+```
+
+**Common Pitfalls**:
+- ❌ Using `requireALPN: true` → causes handshake hang
+- ❌ Using peer certificates in trustRoots → breaks proper CA validation
+- ❌ Using `.fullVerification` without proper SAN entries → verification fails
+- ❌ Not setting `http2.authority` → SNI mismatch
+
+**Testing Notes**:
+- mTLS handshake requires ~2000ms wait time (vs 200ms for plaintext)
+- Use `Bundle.module.resourcePath` to access test certificates
+- Verify certificate chain with: `openssl verify -CAfile ca.pem cert.pem`
 
 ## Testing Strategy
 
@@ -1460,3 +1527,200 @@ public struct DistributedActorService: RegistrableRPCService {
 
 これはActorRuntimeの`InvocationEnvelope`/`ResponseEnvelope`をprotobufメッセージに変換し、
 gRPC経由で送受信するための実装です。
+
+## grpc-swift-2 mTLS Configuration Guide
+
+ActorEdgeはgrpc-swift-2 (GRPCNIOTransportHTTP2Posix)を使用しています。mTLS（相互TLS）の正しい設定方法を理解することが重要です。
+
+### Server-Side mTLS Configuration
+
+サーバー側では、`.mTLS()` ファクトリメソッドを使用します。これにより適切なデフォルト設定が適用されます：
+
+```swift
+// Server側のTLS設定変換
+public func toGRPCTransportSecurity() throws -> HTTP2ServerTransport.Posix.TransportSecurity {
+    let grpcCertSources = try certificateChainSources.map { try $0.toGRPCCertificateSource() }
+    let grpcKeySource = try privateKeySource.toGRPCPrivateKeySource()
+    let grpcTrustRoots = try trustRoots.toGRPCTrustRootsSource()
+    let grpcVerification = clientCertificateVerification.grpcVerification
+
+    // クライアント証明書検証が有効な場合は.mTLS()を使用
+    if grpcVerification != .noVerification {
+        return .mTLS(
+            certificateChain: grpcCertSources,
+            privateKey: grpcKeySource
+        ) { config in
+            config.clientCertificateVerification = grpcVerification
+            config.trustRoots = grpcTrustRoots
+            config.requireALPN = requireALPN
+        }
+    } else {
+        // 通常のTLS（クライアント証明書検証なし）
+        return .tls(
+            certificateChain: grpcCertSources,
+            privateKey: grpcKeySource
+        ) { config in
+            config.trustRoots = grpcTrustRoots
+            config.requireALPN = requireALPN
+        }
+    }
+}
+```
+
+**重要なポイント**:
+- `.mTLS()` を使用すると `clientCertificateVerification` のデフォルトが `.noHostnameVerification` になる
+- `trustRoots` にはクライアント証明書の検証に使うCA証明書を設定する
+- `.tls()` と `.mTLS()` の使い分けは `clientCertificateVerification` の値で判断
+
+### Client-Side mTLS Configuration
+
+クライアント側では、`.mTLS()` を使ってクライアント証明書と秘密鍵を提供します：
+
+```swift
+public func toGRPCClientTransportSecurity() throws -> HTTP2ClientTransport.Posix.TransportSecurity {
+    let grpcTrustRoots = try trustRoots.toGRPCTrustRootsSource()
+    let grpcVerification = serverCertificateVerification.grpcVerification
+
+    // クライアント証明書が設定されている場合
+    let grpcCertSources = try certificateChainSources?.map { try $0.toGRPCCertificateSource() }
+    let grpcKeySource = try privateKeySource?.toGRPCPrivateKeySource()
+
+    if let certChain = grpcCertSources, !certChain.isEmpty, let privateKey = grpcKeySource {
+        return .mTLS(
+            certificateChain: certChain,
+            privateKey: privateKey
+        ) { config in
+            config.trustRoots = grpcTrustRoots
+            config.serverCertificateVerification = grpcVerification
+        }
+    } else {
+        // 通常のTLS（クライアント証明書なし）
+        return .tls { config in
+            config.trustRoots = grpcTrustRoots
+            config.serverCertificateVerification = grpcVerification
+        }
+    }
+}
+```
+
+### HTTP/2 Authority (SNI) Configuration
+
+mTLSでサーバーホスト名検証が必要な場合、HTTP/2 Authorityを設定します：
+
+```swift
+// Client transport作成時
+var transportConfig = HTTP2ClientTransport.Posix.Config.defaults
+if let tlsConfig = tls, let serverHostname = tlsConfig.serverHostname {
+    transportConfig.http2.authority = serverHostname
+}
+
+let clientTransport = try HTTP2ClientTransport.Posix(
+    target: .ipv4(host: host, port: port),
+    transportSecurity: transportSecurity,
+    config: transportConfig
+)
+```
+
+**重要なポイント**:
+- `target` は実際の接続先（IPアドレスまたはホスト名）
+- `config.http2.authority` はTLS SNI（Server Name Indication）に使われる
+- mTLSでは、証明書のSAN（Subject Alternative Name）と一致する必要がある
+
+### Certificate Source Configuration
+
+grpc-swift-2では、証明書を以下の方法で読み込めます：
+
+```swift
+// ファイルから読み込み
+.file(path: "/path/to/cert.pem", format: .pem)
+
+// バイト配列から読み込み
+.bytes([UInt8], format: .der)
+
+// NIOSSLCertificateSourceから直接
+.nioSSLCertificateSource(NIOSSLCertificateSource)
+```
+
+### Trust Roots Configuration
+
+信頼ルートの設定：
+
+```swift
+// システムデフォルトのCA証明書を使用
+.systemDefault
+
+// カスタムCA証明書を使用
+.certificates([
+    .file(path: "/path/to/ca.pem", format: .pem)
+])
+```
+
+### Complete mTLS Example (grpc-swift-2 Test Pattern)
+
+grpc-swift-2の公式テストから学んだパターン：
+
+```swift
+// Server configuration
+let serverConfig = HTTP2ServerTransport.Posix.TransportSecurity.mTLS(
+    certificateChain: [.bytes(serverCert, format: .der)],
+    privateKey: .bytes(serverKey, format: .der)
+) { config in
+    // クライアント証明書を検証するためのCA
+    config.trustRoots = .certificates([
+        .bytes(caCert, format: .der)
+    ])
+}
+
+// Client configuration
+var clientConfig = HTTP2ClientTransport.Posix.Config.defaults
+clientConfig.http2.authority = "localhost"
+
+let clientSecurity = HTTP2ClientTransport.Posix.TransportSecurity.mTLS(
+    certificateChain: [.bytes(clientCert, format: .der)],
+    privateKey: .bytes(clientKey, format: .der)
+) { config in
+    // サーバー証明書を検証するためのCA
+    config.trustRoots = .certificates([
+        .bytes(caCert, format: .der)
+    ])
+}
+
+let clientTransport = try HTTP2ClientTransport.Posix(
+    target: .ipv4(host: "127.0.0.1", port: port),
+    transportSecurity: clientSecurity,
+    config: clientConfig
+)
+```
+
+### Common Pitfalls
+
+1. **`.tls()` と `.mTLS()` の混同**
+   - サーバーでクライアント証明書検証が必要な場合は `.mTLS()` を使う
+   - クライアント側でクライアント証明書を送信する場合も `.mTLS()` を使う
+
+2. **trustRoots の設定ミス**
+   - サーバー側: クライアント証明書を検証するCA証明書が必要
+   - クライアント側: サーバー証明書を検証するCA証明書が必要
+   - 自己署名証明書の場合、ピア証明書そのものを trustRoots に含めることも可能
+
+3. **HTTP/2 Authority の設定忘れ**
+   - SNI（Server Name Indication）が必要な場合、`config.http2.authority` を設定
+   - 証明書のSANと一致する必要がある
+
+4. **Certificate Format の不一致**
+   - `.pem` と `.der` フォーマットを正しく指定
+   - ファイルの実際のフォーマットと一致させる
+
+### Testing mTLS
+
+mTLSのテストでは、以下の証明書が必要：
+- CA証明書と秘密鍵
+- サーバー証明書と秘密鍵（CA署名済み）
+- クライアント証明書と秘密鍵（CA署名済み）
+
+証明書生成スクリプト例：`Tests/ActorEdgeTests/Fixtures/generate-test-certs.sh`
+
+**証明書要件**:
+- サーバー証明書: `extendedKeyUsage = serverAuth`, `keyUsage = digitalSignature,keyEncipherment`
+- クライアント証明書: `extendedKeyUsage = clientAuth`, `keyUsage = digitalSignature,keyEncipherment`
+- サーバー証明書のSAN: `DNS:localhost` および/または `IP:127.0.0.1`

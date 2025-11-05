@@ -15,7 +15,7 @@ struct ChatApplicationTests {
         
         // Create server
         let serverSystem = ActorEdgeSystem(configuration: .init(metrics: .init(namespace: "chat_server")))
-        serverSystem.setPreAssignedIDs(["chat-server"])
+        serverSystem.setPreAssignedIDs([ActorEdgeID("chat-server")])
         
         let chatActor = ChatActor(actorSystem: serverSystem)
         
@@ -124,7 +124,7 @@ struct ChatApplicationTests {
         
         // Create server
         let serverSystem = ActorEdgeSystem(configuration: .init(metrics: .init(namespace: "multi_user_chat")))
-        serverSystem.setPreAssignedIDs(["chat-room"])
+        serverSystem.setPreAssignedIDs([ActorEdgeID("chat-room")])
         
         let chatActor = ChatActor(actorSystem: serverSystem)
         

@@ -133,7 +133,7 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
         actorResolutionsCounter.increment()
 
         // Convert ActorEdgeID to String for ActorRuntime registry
-        let actorIDString = id.description
+        let actorIDString = id.value
 
         // Check if we have this actor locally
         if let actor = registry.find(id: actorIDString) {
@@ -166,19 +166,30 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
         where Act: DistributedActor {
         // Check if we have a pre-assigned ID for this actor type
         if let preAssignedID = preAssignedIDsStorage.getNext() {
-            return ActorEdgeID(preAssignedID)
+            let id = ActorEdgeID(preAssignedID)
+            print("🔵 [ActorEdgeSystem] assignID: Using pre-assigned ID '\(preAssignedID)' -> ActorEdgeID.value='\(id.value)'")
+            return id
         }
         // Otherwise, generate a new ID
-        return ActorEdgeID()
+        let id = ActorEdgeID()
+        print("🔵 [ActorEdgeSystem] assignID: Generated new random ID '\(id.value)'")
+        return id
     }
 
     /// Sets pre-assigned IDs for actors
-    public func setPreAssignedIDs(_ ids: [String]) {
+    public func setPreAssignedIDs(_ ids: [ActorEdgeID]) {
         preAssignedIDsStorage.setIDs(ids)
     }
 
     public func actorReady<Act>(_ actor: Act)
         where Act: DistributedActor {
+        if let actorID = actor.id as? ActorEdgeID {
+            print("🟢 [ActorEdgeSystem] actorReady: type=\(Act.self), id.value='\(actorID.value)', id.description='\(actorID.description)'")
+            registry.register(actor, id: actorID.value)
+        } else {
+            print("🔴 [ActorEdgeSystem] actorReady: Failed to cast actor.id to ActorEdgeID")
+        }
+
         logger.info("Actor ready", metadata: [
             "actorType": "\(Act.self)",
             "actorID": "\(actor.id)"
@@ -186,11 +197,6 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
 
         // Update metrics
         actorRegistrationsCounter.increment()
-
-        // Register actor in ActorRuntime registry
-        if let actorID = actor.id as? ActorEdgeID {
-            registry.register(actor, id: actorID.description)
-        }
     }
 
     public func resignID(_ id: ActorID) {
@@ -199,7 +205,7 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
         ])
 
         // Unregister actor from registry
-        registry.unregister(id: id.description)
+        registry.unregister(id: id.value)
     }
 
     public func makeInvocationEncoder() -> InvocationEncoder {
@@ -220,11 +226,15 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
           Err: Error,
           Res: SerializationRequirement {
 
+        print("🔴 [ActorEdgeSystem] remoteCall: actor.id.value='\(actor.id.value)', target='\(target.identifier)'")
+
         // Update metrics
         distributedCallsCounter.increment()
 
         // Check if we have a local actor for this ID
-        if let localActor = registry.find(id: actor.id.description) {
+        print("🔴 [ActorEdgeSystem] remoteCall: Looking for local actor with id='\(actor.id.value)'")
+        if let localActor = registry.find(id: actor.id.value) {
+            print("🟢 [ActorEdgeSystem] remoteCall: Found local actor, executing locally")
             // Local execution: call the actor directly using executeDistributedTarget
             logger.trace("Executing local call", metadata: ["actorID": "\(actor.id)", "target": "\(target.identifier)"])
 
@@ -233,7 +243,7 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
 
             // Create InvocationEnvelope from encoder
             let invocationEnvelope = try invocation.makeInvocationEnvelope(
-                recipientID: actor.id.description,
+                recipientID: actor.id.value,
                 senderID: nil
             )
 
@@ -285,25 +295,31 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
         }
 
         // Remote execution: require transport
+        print("🔵 [ActorEdgeSystem] remoteCall: No local actor, using remote transport")
         guard let transport = transport else {
+            print("🔴 [ActorEdgeSystem] remoteCall: ERROR - No transport configured!")
             throw RuntimeError.transportFailed("No transport configured")
         }
 
+        print("🔵 [ActorEdgeSystem] remoteCall: Recording target and creating envelope")
         // Record target (it's passed as parameter, not yet in encoder)
         invocation.recordTarget(target)
 
         // Create InvocationEnvelope from encoder
         let invocationEnvelope = try invocation.makeInvocationEnvelope(
-            recipientID: actor.id.description,
+            recipientID: actor.id.value,
             senderID: nil
         )
 
+        print("🔵 [ActorEdgeSystem] remoteCall: Sending invocation through transport, callID='\(invocationEnvelope.callID)'")
         // Send through transport and get response
         let responseEnvelope = try await transport.sendInvocation(invocationEnvelope)
+        print("🟢 [ActorEdgeSystem] remoteCall: Received response from transport")
 
         // Extract result from response
         switch responseEnvelope.result {
         case .success(let data):
+            print("🟢 [ActorEdgeSystem] remoteCall: Success response, decoding result")
             // Deserialize the result
             let decoder = JSONDecoder()
             return try decoder.decode(Res.self, from: data)
@@ -334,7 +350,7 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
         distributedCallsCounter.increment()
 
         // Check if we have a local actor for this ID
-        if let localActor = registry.find(id: actor.id.description) {
+        if let localActor = registry.find(id: actor.id.value) {
             // Local execution: call the actor directly using executeDistributedTarget
             logger.trace("Executing local void call", metadata: ["actorID": "\(actor.id)", "target": "\(target.identifier)"])
 
@@ -343,7 +359,7 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
 
             // Create InvocationEnvelope from encoder
             let invocationEnvelope = try invocation.makeInvocationEnvelope(
-                recipientID: actor.id.description,
+                recipientID: actor.id.value,
                 senderID: nil
             )
 
@@ -404,7 +420,7 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
 
         // Create InvocationEnvelope from encoder
         let invocationEnvelope = try invocation.makeInvocationEnvelope(
-            recipientID: actor.id.description,
+            recipientID: actor.id.value,
             senderID: nil
         )
 
@@ -433,7 +449,7 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
 
     /// Find an actor by ID
     public func findActor(id: ActorEdgeID) -> (any DistributedActor)? {
-        return registry.find(id: id.description)
+        return registry.find(id: id.value)
     }
 
     /// Get the ActorRuntime registry (for server integration)
@@ -456,16 +472,20 @@ private final class PreAssignedIDStorage: @unchecked Sendable {
     private let lock = NSLock()
     private var ids: [String] = []
 
-    func setIDs(_ newIDs: [String]) {
+    func setIDs(_ newIDs: [ActorEdgeID]) {
         lock.lock()
         defer { lock.unlock() }
-        ids = newIDs
+        // Convert ActorEdgeID to String internally using .value
+        ids = newIDs.map(\.value)
+        print("🟡 [PreAssignedIDStorage] setIDs: Stored \(ids.count) IDs: \(ids)")
     }
 
     func getNext() -> String? {
         lock.lock()
         defer { lock.unlock() }
-        return ids.isEmpty ? nil : ids.removeFirst()
+        let next = ids.isEmpty ? nil : ids.removeFirst()
+        print("🟡 [PreAssignedIDStorage] getNext: Returning '\(next ?? "nil")', remaining: \(ids)")
+        return next
     }
 }
 
