@@ -3,15 +3,9 @@ import NIOSSL
 
 /// Utilities for working with TLS certificates
 public enum CertificateUtilities {
-    
+
     // MARK: - Certificate Loading
-    
-    /// Load a certificate from a PEM or DER file
-    public static func loadCertificate(from path: String, format: SerializationFormat = .pem) throws -> NIOSSLCertificate {
-        let source = CertificateSource.file(path, format: format)
-        return try source.load()
-    }
-    
+
     /// Load multiple certificates from a PEM file (certificate chain)
     public static func loadCertificateChain(from path: String) throws -> [NIOSSLCertificate] {
         let data = try Data(contentsOf: URL(fileURLWithPath: path))
@@ -30,41 +24,6 @@ public enum CertificateUtilities {
         }
         
         return certificates
-    }
-    
-    /// Create certificate sources from a chain file
-    public static func certificateSources(from chainPath: String, format: SerializationFormat = .pem) throws -> [CertificateSource] {
-        let certificates = try loadCertificateChain(from: chainPath)
-        return certificates.map { .certificate($0) }
-    }
-    
-    /// Load a private key from a PEM or DER file
-    public static func loadPrivateKey(
-        from path: String,
-        format: SerializationFormat = .pem,
-        passphrase: String? = nil
-    ) throws -> NIOSSLPrivateKey {
-        let source: PrivateKeySource
-        source = .file(path, format: format, passphrase: passphrase)
-        return try source.load()
-    }
-    
-    // MARK: - Trust Store Management
-    
-    /// Create trust roots from CA certificates
-    public static func createTrustRoots(from certificates: [NIOSSLCertificate]) -> NIOSSLTrustRoots {
-        return .certificates(certificates)
-    }
-    
-    /// Load trust roots from a CA bundle file
-    public static func loadTrustRoots(from path: String) throws -> NIOSSLTrustRoots {
-        let certificates = try loadCertificateChain(from: path)
-        return .certificates(certificates)
-    }
-    
-    /// Use system default trust roots
-    public static func systemTrustRoots() -> TrustRootsSource {
-        return .systemDefault
     }
     
     // MARK: - Quick Configuration Helpers

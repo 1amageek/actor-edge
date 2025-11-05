@@ -98,6 +98,9 @@ let package = Package(
                 "ActorEdgeCore",
                 "ActorEdgeServer",
                 "ActorEdgeClient"
+            ],
+            resources: [
+                .copy("Fixtures/certificates")
             ]
         ),
     ]

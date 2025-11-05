@@ -2,6 +2,23 @@ import Foundation
 import NIOSSL
 import GRPCNIOTransportHTTP2
 
+// MARK: - TLS Errors
+
+/// Errors that can occur during TLS configuration
+public enum TLSConfigurationError: Error, LocalizedError, Equatable {
+    case preloadedCertificatesNotSupported
+    case preloadedPrivateKeysNotSupported
+
+    public var errorDescription: String? {
+        switch self {
+        case .preloadedCertificatesNotSupported:
+            return "Pre-loaded certificates are not supported in grpc-swift transport. Use .file() or .bytes() instead."
+        case .preloadedPrivateKeysNotSupported:
+            return "Pre-loaded private keys are not supported in grpc-swift transport. Use .file() or .bytes() instead."
+        }
+    }
+}
+
 // MARK: - Certificate Source
 
 /// Source for loading TLS certificates
@@ -27,14 +44,15 @@ public enum CertificateSource: Sendable {
     }
 
     /// Convert to grpc-swift TLSConfig.CertificateSource
-    func toGRPCCertificateSource() -> TLSConfig.CertificateSource {
+    /// - Throws: `TLSConfigurationError.preloadedCertificatesNotSupported` if using pre-loaded certificates
+    public func toGRPCCertificateSource() throws -> TLSConfig.CertificateSource {
         switch self {
         case .file(let path, let format):
             return .file(path: path, format: format.grpcFormat)
         case .bytes(let data, let format):
             return .bytes(Array(data), format: format.grpcFormat)
         case .certificate:
-            fatalError("Pre-loaded certificates not supported in grpc-swift transport")
+            throw TLSConfigurationError.preloadedCertificatesNotSupported
         }
     }
 }
@@ -76,14 +94,15 @@ public enum PrivateKeySource: Sendable {
     }
 
     /// Convert to grpc-swift TLSConfig.PrivateKeySource
-    func toGRPCPrivateKeySource() -> TLSConfig.PrivateKeySource {
+    /// - Throws: `TLSConfigurationError.preloadedPrivateKeysNotSupported` if using pre-loaded private keys
+    public func toGRPCPrivateKeySource() throws -> TLSConfig.PrivateKeySource {
         switch self {
         case .file(let path, let format, _):
             return .file(path: path, format: format.grpcFormat)
         case .bytes(let data, let format, _):
             return .bytes(Array(data), format: format.grpcFormat)
         case .privateKey:
-            fatalError("Pre-loaded private keys not supported in grpc-swift transport")
+            throw TLSConfigurationError.preloadedPrivateKeysNotSupported
         }
     }
 }
@@ -113,12 +132,13 @@ public enum TrustRootsSource: Sendable {
     }
 
     /// Convert to grpc-swift TLSConfig.TrustRootsSource
-    func toGRPCTrustRootsSource() -> TLSConfig.TrustRootsSource {
+    /// - Throws: `TLSConfigurationError.preloadedCertificatesNotSupported` if any certificate source uses pre-loaded certificates
+    public func toGRPCTrustRootsSource() throws -> TLSConfig.TrustRootsSource {
         switch self {
         case .systemDefault:
             return .systemDefault
         case .certificates(let sources):
-            return .certificates(sources.map { $0.toGRPCCertificateSource() })
+            return try .certificates(sources.map { try $0.toGRPCCertificateSource() })
         case .none:
             return .systemDefault
         }

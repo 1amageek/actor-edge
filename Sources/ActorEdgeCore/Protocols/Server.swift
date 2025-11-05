@@ -105,13 +105,28 @@ public extension Server {
     func actors(actorSystem: ActorEdgeSystem) -> [any DistributedActor] {
         []
     }
-    
+
+    /// Actor IDs for pre-registered actors (empty by default)
     var actorIDs: [String] { [] }
+
+    /// Server port (default: 8000, similar to Deno)
     var port: Int { 8000 }
+
+    /// Server bind address (default: 127.0.0.1 for localhost-only access)
     var host: String { "127.0.0.1" }
+
+    /// TLS configuration (default: nil for plaintext connections)
     var tls: TLSConfiguration? { nil }
+
+    /// Maximum concurrent connections (default: 1000)
     var maxConnections: Int { 1000 }
+
+    /// Request timeout in seconds (default: 30)
     var timeout: TimeInterval { 30 }
+
+    /// Maximum retry attempts for failed operations (default: 3)
     var maxRetries: Int { 3 }
+
+    /// Metrics collection configuration (default: enabled with standard namespace)
     var metrics: MetricsConfiguration { .default }
 }

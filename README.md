@@ -167,13 +167,64 @@ ActorEdge uses a protocol-independent transport layer:
 let system = try await ActorEdgeSystem.grpcClient(endpoint: "server:8000")
 
 // Custom transport implementation
-class MyCustomTransport: MessageTransport {
-    func send(_ envelope: Envelope) async throws { /* ... */ }
-    func receive() -> AsyncStream<Envelope> { /* ... */ }
-    func close() async throws { /* ... */ }
+import ActorRuntime
+
+class MyCustomTransport: ActorRuntime.DistributedTransport {
+    func sendInvocation(_ envelope: InvocationEnvelope) async throws -> ResponseEnvelope {
+        // Implement custom transport logic
+        // ...
+    }
+
+    func sendResponse(_ envelope: ResponseEnvelope) async throws {
+        // Server-side response handling
+        // ...
+    }
+
+    func close() async throws {
+        // Cleanup resources
+        // ...
+    }
 }
 
-let system = ActorEdgeSystem(transport: MyCustomTransport())
+let system = ActorEdgeSystem.client(transport: MyCustomTransport())
+```
+
+### Metrics and Observability
+
+ActorEdge includes built-in metrics for production monitoring using Swift Metrics:
+
+```swift
+import Metrics
+
+// Configure metrics in your server
+@main
+struct MyServer: Server {
+    var metrics: MetricsConfiguration {
+        MetricsConfiguration(
+            enabled: true,
+            namespace: "my_app",
+            labels: ["service": "api", "env": "production"]
+        )
+    }
+}
+
+// Available metrics:
+// - actor_edge_distributed_calls_total: Total distributed calls
+// - actor_edge_actor_registrations_total: Total actor registrations
+// - actor_edge_actor_resolutions_total: Total actor resolutions
+// - actor_edge_message_transport_latency_seconds: Transport latency
+// - actor_edge_messages_envelopes_errors_total: Total envelope errors
+```
+
+You can integrate with any Swift Metrics backend (Prometheus, StatsD, etc.):
+
+```swift
+import Metrics
+import Prometheus
+
+// Bootstrap with Prometheus
+let prom = PrometheusClient()
+MetricsSystem.bootstrap(prom)
 ```
 
 ### TLS Configuration
@@ -222,6 +273,97 @@ let system = try await ActorEdgeSystem.grpcClient(
     )
 )
 ```
+
+### Generics Support
+
+ActorEdge supports generics at the **actor type level** but has limitations with **method-level generics** in `@Resolvable` protocols.
+
+#### ✅ Supported: Generic Actor Types
+
+You can create distributed actors with type parameters. The type is determined at actor creation time:
+
+```swift
+import ActorEdge
+import Distributed
+
+// Generic distributed actor - fully supported
+distributed actor GenericStorage<T: Codable & Sendable> {
+    typealias ActorSystem = ActorEdgeSystem
+
+    private var value: T
+
+    init(initialValue: T, actorSystem: ActorSystem) {
+        self.value = initialValue
+        self.actorSystem = actorSystem
+    }
+
+    distributed func get() async throws -> T {
+        return value
+    }
+
+    distributed func set(_ newValue: T) async throws {
+        self.value = newValue
+    }
+}
+
+// Usage - type is fixed at creation
+let system = ActorEdgeSystem()
+let intStorage = GenericStorage(initialValue: 42, actorSystem: system)
+let stringStorage = GenericStorage(initialValue: "Hello", actorSystem: system)
+
+let number = try await intStorage.get()  // Returns Int: 42
+let text = try await stringStorage.get()  // Returns String: "Hello"
+```
+
+#### ❌ Not Supported: Generic Methods in @Resolvable Protocols
+
+**Current Limitation**: Swift 6.2's `@Resolvable` macro does not support method-level generic type parameters. Generic methods will cause runtime crashes (Signal 11).
+
+```swift
+// ❌ NOT SUPPORTED - Will crash at runtime
+@Resolvable
+protocol EchoService: DistributedActor where ActorSystem == ActorEdgeSystem {
+    distributed func echo<T: Codable & Sendable>(_ value: T) async throws -> T
+}
+```
+
+**Workaround**: Define separate methods for each concrete type you need:
+
+```swift
+// ✅ RECOMMENDED - Define methods for specific types
+@Resolvable
+protocol EchoService: DistributedActor where ActorSystem == ActorEdgeSystem {
+    distributed func echoString(_ value: String) async throws -> String
+    distributed func echoInt(_ value: Int) async throws -> Int
+    distributed func echoData(_ value: Data) async throws -> Data
+    distributed func echoMessage(_ value: CustomMessage) async throws -> CustomMessage
+}
+
+// Implementation
+distributed actor EchoActor: EchoService {
+    typealias ActorSystem = ActorEdgeSystem
+
+    distributed func echoString(_ value: String) async throws -> String {
+        return value
+    }
+
+    distributed func echoInt(_ value: Int) async throws -> Int {
+        return value
+    }
+
+    distributed func echoData(_ value: Data) async throws -> Data {
+        return value
+    }
+
+    distributed func echoMessage(_ value: CustomMessage) async throws -> CustomMessage {
+        return value
+    }
+}
+```
+
+**Why This Limitation Exists**: The `@Resolvable` macro generates stub code that must call `recordGenericSubstitution()` for method-level generics. This is not currently implemented in Swift 6.2's macro expansion. This limitation may be resolved in future Swift versions.
+
+**Best Practice**: Use generic actor types when you need type flexibility, and use specific method signatures in `@Resolvable` protocols for distributed communication.
 
 ### Error Handling
 

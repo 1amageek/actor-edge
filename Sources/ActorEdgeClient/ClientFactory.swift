@@ -31,7 +31,7 @@ public extension ActorEdgeSystem {
     /// - Parameters:
     ///   - endpoint: The server endpoint in "host:port" format (e.g., "localhost:8000")
     ///   - tls: Optional TLS configuration for secure connections
-    ///   - configuration: System configuration including metrics, tracing, etc.
+    ///   - configuration: System configuration including metrics
     /// - Returns: A configured ActorEdgeSystem with gRPC transport
     static func grpcClient(
         endpoint: String,
@@ -77,7 +77,7 @@ public extension ActorEdgeSystem {
     ///
     /// - Parameters:
     ///   - transport: The custom transport implementation conforming to ActorRuntime.DistributedTransport
-    ///   - configuration: System configuration including metrics, tracing, etc.
+    ///   - configuration: System configuration including metrics
     /// - Returns: A configured ActorEdgeSystem with the custom transport
     static func client(
         transport: DistributedTransport,

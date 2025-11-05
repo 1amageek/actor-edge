@@ -23,8 +23,9 @@ public struct ActorEdgeID: Sendable, Hashable, Codable {
 
 // MARK: - CustomStringConvertible
 extension ActorEdgeID: CustomStringConvertible {
+    /// String representation of the actor ID
     public var description: String {
-        value
+        "ActorEdgeID(\(value))"
     }
 }
 

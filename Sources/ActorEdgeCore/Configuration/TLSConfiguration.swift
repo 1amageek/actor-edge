@@ -20,9 +20,7 @@ public struct TLSConfiguration: Sendable {
     public let maximumTLSVersion: TLSVersion
     /// Whether to require ALPN
     public let requireALPN: Bool
-    /// Passphrase for encrypted private keys
-    public let passphrase: String?
-    
+
     public init(
         certificateChainSources: [CertificateSource],
         privateKeySource: PrivateKeySource,
@@ -31,8 +29,7 @@ public struct TLSConfiguration: Sendable {
         cipherSuites: [NIOTLSCipher]? = nil,
         minimumTLSVersion: TLSVersion = .tlsv12,
         maximumTLSVersion: TLSVersion = .tlsv13,
-        requireALPN: Bool = true,
-        passphrase: String? = nil
+        requireALPN: Bool = true
     ) {
         self.certificateChainSources = certificateChainSources
         self.privateKeySource = privateKeySource
@@ -42,7 +39,6 @@ public struct TLSConfiguration: Sendable {
         self.minimumTLSVersion = minimumTLSVersion
         self.maximumTLSVersion = maximumTLSVersion
         self.requireALPN = requireALPN
-        self.passphrase = passphrase
     }
     
     
@@ -99,11 +95,12 @@ public struct TLSConfiguration: Sendable {
     // MARK: - grpc-swift Conversion
 
     /// Convert to grpc-swift HTTP2ServerTransport.Posix.TransportSecurity
+    /// - Throws: `TLSConfigurationError` if using pre-loaded certificates or private keys
     public func toGRPCTransportSecurity() throws -> HTTP2ServerTransport.Posix.TransportSecurity {
         // Use conversion methods from TLSTypes
-        let grpcCertSources = certificateChainSources.map { $0.toGRPCCertificateSource() }
-        let grpcKeySource = privateKeySource.toGRPCPrivateKeySource()
-        let grpcTrustRoots = trustRoots.toGRPCTrustRootsSource()
+        let grpcCertSources = try certificateChainSources.map { try $0.toGRPCCertificateSource() }
+        let grpcKeySource = try privateKeySource.toGRPCPrivateKeySource()
+        let grpcTrustRoots = try trustRoots.toGRPCTrustRootsSource()
         let grpcVerification = clientCertificateVerification.grpcVerification
 
         // Create grpc-swift TLS config
@@ -126,6 +123,8 @@ public struct ClientTLSConfiguration: Sendable {
     public let certificateChainSources: [CertificateSource]?
     /// Private key source (for mTLS)
     public let privateKeySource: PrivateKeySource?
+    /// Server certificate verification mode
+    public let serverCertificateVerification: CertificateVerification
     /// Cipher suites to use
     public let cipherSuites: [NIOTLSCipher]?
     /// Minimum TLS version
@@ -134,11 +133,12 @@ public struct ClientTLSConfiguration: Sendable {
     public let maximumTLSVersion: TLSVersion
     /// Server hostname for verification
     public let serverHostname: String?
-    
+
     public init(
         trustRoots: TrustRootsSource = .systemDefault,
         certificateChainSources: [CertificateSource]? = nil,
         privateKeySource: PrivateKeySource? = nil,
+        serverCertificateVerification: CertificateVerification = .fullVerification,
         cipherSuites: [NIOTLSCipher]? = nil,
         minimumTLSVersion: TLSVersion = .tlsv12,
         maximumTLSVersion: TLSVersion = .tlsv13,
@@ -147,6 +147,7 @@ public struct ClientTLSConfiguration: Sendable {
         self.trustRoots = trustRoots
         self.certificateChainSources = certificateChainSources
         self.privateKeySource = privateKeySource
+        self.serverCertificateVerification = serverCertificateVerification
         self.cipherSuites = cipherSuites
         self.minimumTLSVersion = minimumTLSVersion
         self.maximumTLSVersion = maximumTLSVersion
@@ -181,20 +182,26 @@ public struct ClientTLSConfiguration: Sendable {
     }
     
     /// Insecure configuration (development only)
+    /// - Warning: This disables certificate verification. Use only for development/testing with self-signed certificates.
     public static func insecure() -> ClientTLSConfiguration {
-        return ClientTLSConfiguration(trustRoots: .none)
+        return ClientTLSConfiguration(
+            trustRoots: .none,
+            serverCertificateVerification: .none
+        )
     }
 
     // MARK: - grpc-swift Conversion
 
     /// Convert to grpc-swift HTTP2ClientTransport.Posix.TransportSecurity
+    /// - Throws: `TLSConfigurationError` if using pre-loaded certificates or private keys
     public func toGRPCClientTransportSecurity() throws -> HTTP2ClientTransport.Posix.TransportSecurity {
         // Use conversion methods from TLSTypes
-        let grpcTrustRoots = trustRoots.toGRPCTrustRootsSource()
+        let grpcTrustRoots = try trustRoots.toGRPCTrustRootsSource()
+        let grpcVerification = serverCertificateVerification.grpcVerification
 
         // Convert certificate chain and private key for mTLS if provided
-        let grpcCertSources = certificateChainSources?.map { $0.toGRPCCertificateSource() }
-        let grpcKeySource = privateKeySource?.toGRPCPrivateKeySource()
+        let grpcCertSources = try certificateChainSources?.map { try $0.toGRPCCertificateSource() }
+        let grpcKeySource = try privateKeySource?.toGRPCPrivateKeySource()
 
         // If we have mTLS configuration
         if let certChain = grpcCertSources, !certChain.isEmpty, let privateKey = grpcKeySource {
@@ -203,13 +210,13 @@ public struct ClientTLSConfiguration: Sendable {
                 privateKey: privateKey
             ) { config in
                 config.trustRoots = grpcTrustRoots
-                config.serverCertificateVerification = .fullVerification
+                config.serverCertificateVerification = grpcVerification
             }
         } else {
             // Regular TLS without client certificates
             return .tls { config in
                 config.trustRoots = grpcTrustRoots
-                config.serverCertificateVerification = .fullVerification
+                config.serverCertificateVerification = grpcVerification
             }
         }
     }

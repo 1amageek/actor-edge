@@ -89,6 +89,10 @@ public final class GRPCTransport: DistributedTransport, Sendable {
 
     public func close() async throws {
         logger.info("Closing gRPC transport")
+
+        // Finish the incoming invocations stream to prevent hanging tasks
+        incomingContinuation.finish()
+
         // GRPCClient doesn't have a close method in grpc-swift 2.0
         // The client will be closed when it's deallocated
     }

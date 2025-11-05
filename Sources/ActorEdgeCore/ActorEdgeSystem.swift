@@ -138,13 +138,24 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
         // Check if we have this actor locally
         if let actor = registry.find(id: actorIDString) {
             // Try to cast to the requested type
-            guard let typedActor = actor as? Act else {
-                throw RuntimeError.executionFailed(
-                    "Actor type mismatch for \(id): expected \(Act.self), actual \(type(of: actor))",
-                    underlying: "Type mismatch"
-                )
+            if let typedActor = actor as? Act {
+                // Direct type match - return the actor
+                return typedActor
             }
-            return typedActor
+
+            // For @Resolvable protocol stubs ($Protocol), the actor may be the concrete
+            // implementation type (e.g., TestActorImpl) rather than the stub type ($TestActor).
+            // In this case, return nil to let Swift runtime create the appropriate stub/proxy.
+            // The runtime will forward calls to this local actor through remoteCall.
+            logger.trace(
+                "Actor found but type differs",
+                metadata: [
+                    "actorID": "\(id)",
+                    "requestedType": "\(Act.self)",
+                    "actualType": "\(type(of: actor))"
+                ]
+            )
+            return nil
         }
 
         // If not found locally, return nil to let the runtime create a remote proxy
@@ -208,15 +219,80 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
           Act.ID == ActorID,
           Err: Error,
           Res: SerializationRequirement {
-        guard let transport = transport else {
-            throw RuntimeError.transportFailed("No transport configured")
-        }
 
         // Update metrics
         distributedCallsCounter.increment()
 
+        // Check if we have a local actor for this ID
+        if let localActor = registry.find(id: actor.id.description) {
+            // Local execution: call the actor directly using executeDistributedTarget
+            logger.trace("Executing local call", metadata: ["actorID": "\(actor.id)", "target": "\(target.identifier)"])
+
+            // Record target (it's passed as parameter, not yet in encoder)
+            invocation.recordTarget(target)
+
+            // Create InvocationEnvelope from encoder
+            let invocationEnvelope = try invocation.makeInvocationEnvelope(
+                recipientID: actor.id.description,
+                senderID: nil
+            )
+
+            // Create decoder from envelope
+            var decoder = try CodableInvocationDecoder(envelope: invocationEnvelope)
+
+            // Capture the response
+            var capturedResponse: ResponseEnvelope?
+
+            // Create result handler with send closure
+            let handler = CodableResultHandler(
+                callID: invocationEnvelope.callID,
+                sendResponse: { response in
+                    capturedResponse = response
+                }
+            )
+
+            // Execute the distributed target on the local actor
+            try await executeDistributedTarget(
+                on: localActor,
+                target: target,
+                invocationDecoder: &decoder,
+                handler: handler
+            )
+
+            // Get the captured response
+            guard let responseEnvelope = capturedResponse else {
+                throw RuntimeError.executionFailed(
+                    "No response captured from local actor execution",
+                    underlying: "Internal error"
+                )
+            }
+
+            // Extract and return result
+            switch responseEnvelope.result {
+            case .success(let data):
+                let decoder = JSONDecoder()
+                return try decoder.decode(Res.self, from: data)
+
+            case .void:
+                throw RuntimeError.executionFailed(
+                    "Unexpected void response for non-void call",
+                    underlying: "Protocol mismatch"
+                )
+
+            case .failure(let error):
+                throw error
+            }
+        }
+
+        // Remote execution: require transport
+        guard let transport = transport else {
+            throw RuntimeError.transportFailed("No transport configured")
+        }
+
+        // Record target (it's passed as parameter, not yet in encoder)
+        invocation.recordTarget(target)
+
         // Create InvocationEnvelope from encoder
-        // Note: actor.id is already ActorEdgeID since Act.ID == ActorID
         let invocationEnvelope = try invocation.makeInvocationEnvelope(
             recipientID: actor.id.description,
             senderID: nil
@@ -239,11 +315,8 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
             )
 
         case .failure(let error):
-            // Re-throw the remote error
-            throw RuntimeError.executionFailed(
-                "Remote call failed: \(error)",
-                underlying: "\(error)"
-            )
+            // Re-throw the remote error directly to preserve error type information
+            throw error
         }
     }
 
@@ -257,15 +330,79 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
           Act.ID == ActorID,
           Err: Error {
 
+        // Update metrics
+        distributedCallsCounter.increment()
+
+        // Check if we have a local actor for this ID
+        if let localActor = registry.find(id: actor.id.description) {
+            // Local execution: call the actor directly using executeDistributedTarget
+            logger.trace("Executing local void call", metadata: ["actorID": "\(actor.id)", "target": "\(target.identifier)"])
+
+            // Record target (it's passed as parameter, not yet in encoder)
+            invocation.recordTarget(target)
+
+            // Create InvocationEnvelope from encoder
+            let invocationEnvelope = try invocation.makeInvocationEnvelope(
+                recipientID: actor.id.description,
+                senderID: nil
+            )
+
+            // Create decoder from envelope
+            var decoder = try CodableInvocationDecoder(envelope: invocationEnvelope)
+
+            // Capture the response
+            var capturedResponse: ResponseEnvelope?
+
+            // Create result handler with send closure
+            let handler = CodableResultHandler(
+                callID: invocationEnvelope.callID,
+                sendResponse: { response in
+                    capturedResponse = response
+                }
+            )
+
+            // Execute the distributed target on the local actor
+            try await executeDistributedTarget(
+                on: localActor,
+                target: target,
+                invocationDecoder: &decoder,
+                handler: handler
+            )
+
+            // Get the captured response
+            guard let responseEnvelope = capturedResponse else {
+                throw RuntimeError.executionFailed(
+                    "No response captured from local actor execution",
+                    underlying: "Internal error"
+                )
+            }
+
+            // Extract and verify void result
+            switch responseEnvelope.result {
+            case .void:
+                // Expected for void return
+                return
+
+            case .success(_):
+                throw RuntimeError.executionFailed(
+                    "Unexpected non-void response for void call",
+                    underlying: "Protocol mismatch"
+                )
+
+            case .failure(let error):
+                throw error
+            }
+        }
+
+        // Remote execution: require transport
         guard let transport = transport else {
             throw RuntimeError.transportFailed("No transport configured")
         }
 
-        // Update metrics
-        distributedCallsCounter.increment()
+        // Record target (it's passed as parameter, not yet in encoder)
+        invocation.recordTarget(target)
 
         // Create InvocationEnvelope from encoder
-        // Note: actor.id is already ActorEdgeID since Act.ID == ActorID
         let invocationEnvelope = try invocation.makeInvocationEnvelope(
             recipientID: actor.id.description,
             senderID: nil
@@ -287,11 +424,8 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
             )
 
         case .failure(let error):
-            // Re-throw the remote error
-            throw RuntimeError.executionFailed(
-                "Remote call failed: \(error)",
-                underlying: "\(error)"
-            )
+            // Re-throw the remote error directly to preserve error type information
+            throw error
         }
     }
 
@@ -334,3 +468,4 @@ private final class PreAssignedIDStorage: @unchecked Sendable {
         return ids.isEmpty ? nil : ids.removeFirst()
     }
 }
+

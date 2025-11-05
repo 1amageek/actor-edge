@@ -74,6 +74,83 @@ ActorEdge fully embraces Swift's modern async/await concurrency model, providing
 
 **Important**: This implementation requires macOS 15.0+ due to Distributed Actor and modern Swift concurrency dependencies.
 
+### @Resolvable Generics Limitations
+
+**CRITICAL**: Swift 6.2's `@Resolvable` macro has limitations with generics that developers must understand.
+
+#### ✅ Supported: Generic Actor Types
+
+Generic distributed actors work perfectly. The type parameter is resolved at actor creation time:
+
+```swift
+distributed actor GenericStorage<T: Codable & Sendable> {
+    typealias ActorSystem = ActorEdgeSystem
+
+    private var value: T
+
+    init(initialValue: T, actorSystem: ActorSystem) {
+        self.value = initialValue
+        self.actorSystem = actorSystem
+    }
+
+    distributed func get() async throws -> T {
+        return value
+    }
+
+    distributed func set(_ newValue: T) async throws {
+        self.value = newValue
+    }
+}
+
+// Usage
+let intStorage = GenericStorage(initialValue: 42, actorSystem: system)
+let value = try await intStorage.get()  // Works perfectly
+```
+
+#### ❌ NOT Supported: Generic Methods in @Resolvable Protocols
+
+**Do NOT use method-level generics in `@Resolvable` protocols**. They will cause Signal 11 (SIGSEGV) crashes:
+
+```swift
+// ❌ NEVER DO THIS - Will crash at runtime
+@Resolvable
+protocol EchoService: DistributedActor where ActorSystem == ActorEdgeSystem {
+    distributed func echo<T: Codable & Sendable>(_ value: T) async throws -> T
+}
+```
+
+**Root Cause**: The `@Resolvable` macro does not call `recordGenericSubstitution()` for method-level type parameters. This causes the Swift runtime to use the wrong type (the stub type instead of the actual argument type), leading to serialization failures and crashes.
+
+**Correct Approach**: Define separate methods for each concrete type:
+
+```swift
+// ✅ ALWAYS DO THIS - Works reliably
+@Resolvable
+protocol EchoService: DistributedActor where ActorSystem == ActorEdgeSystem {
+    distributed func echoString(_ value: String) async throws -> String
+    distributed func echoInt(_ value: Int) async throws -> Int
+    distributed func echoData(_ value: Data) async throws -> Data
+}
+
+distributed actor EchoActor: EchoService {
+    typealias ActorSystem = ActorEdgeSystem
+
+    distributed func echoString(_ value: String) async throws -> String {
+        return value
+    }
+
+    distributed func echoInt(_ value: Int) async throws -> Int {
+        return value
+    }
+
+    distributed func echoData(_ value: Data) async throws -> Data {
+        return value
+    }
+}
+```
+
+**Testing Note**: Never write tests for generic methods in `@Resolvable` protocols. They will fail. Reference implementations like Bleu (BLE-based distributed actors) also avoid generic methods in protocols.
+
 ### Design Philosophy: Swift Distributed Compliance
 
 ActorEdge follows the core design principles of Swift Distributed:
@@ -165,7 +242,6 @@ public protocol Server {
     var maxConnections: Int { get }
     var timeout: TimeInterval { get }
     var metrics: MetricsConfiguration { get }
-    var tracing: TracingConfiguration { get }
 }
 
 // Default implementations provided
@@ -180,7 +256,6 @@ extension Server {
     var maxConnections: Int { 1000 }
     var timeout: TimeInterval { 30 }
     var metrics: MetricsConfiguration { .default }
-    var tracing: TracingConfiguration { .default }
 }
 ```
 
@@ -354,36 +429,36 @@ message RemoteCallRequest {
 ### Implementation Status
 
 ✅ **Completed (Current Implementation)**:
-1. **Package.swift**: Added all dependencies including gRPC Swift 2.0
-2. **Core Types**: Basic `ActorEdgeSystem` and `ActorTransport` protocol
-3. **Serialization**: `ActorEdgeInvocationEncoder/Decoder` with JSON format
+1. **ActorRuntime 0.2.0 Integration**: Using ActorRuntime for core distributed actor system
+2. **Core Types**: `ActorEdgeSystem` with ActorRuntime's `DistributedTransport` protocol
+3. **GRPCTransport**: gRPC implementation using ActorRuntime's envelope types
 4. **Server Protocol**: `Server` protocol with `@ActorBuilder` and `main()` extension
-5. **gRPC Transport**: Direct `GRPCActorTransport` implementation (needs refactoring)
-6. **Service**: `DistributedActorService` as RegistrableRPCService
-7. **Protobuf**: SwiftProtobufPlugin for automatic code generation
-8. **Error Handling**: Basic `ErrorEnvelope` implementation
-9. **Actor Registry**: Server-side actor registration and lookup system
-10. **Method Invocation**: Runtime distributed method execution with ResultHandler
-11. **ActorBuilder**: SwiftUI-style declarative actor configuration
-12. **Examples**: Complete Chat example with SharedAPI, Server, and Client
-13. **Testing Strategy**: Comprehensive testing framework and guidelines
-14. **TLS Support**: Production-ready TLS configuration with certificate abstraction
+5. **Service**: `DistributedActorService` handling gRPC method dispatch
+6. **Actor Registry**: Server-side actor registration and lookup system
+7. **ActorBuilder**: SwiftUI-style declarative actor configuration
+8. **Examples**: Complete Chat example with SharedAPI, Server, and Client
+9. **Testing**: 10/10 tests passing with comprehensive test utilities
+10. **TLS Configuration**: Complete abstraction with gRPC conversion utilities
+11. **Metrics**: All 5 core metrics implemented (calls, registrations, resolutions, latency, errors)
+12. **Code Quality**: ~200 lines of redundant code removed, duplication eliminated
 
-🔄 **Architecture Refactoring Required**:
-1. **ActorEdgeEnvelope**: Implement protocol-independent message container
-2. **MessageTransport Protocol**: Create abstract transport interface
-3. **GRPCMessageTransport**: Refactor current GRPCActorTransport to implement MessageTransport
-4. **InMemoryMessageTransport**: Add for testing without network
-5. **ActorEdgeSystem Update**: Use MessageTransport instead of direct gRPC dependency
-6. **Factory Methods**: Add transport-agnostic client creation methods
+✅ **Recently Completed**:
+- **Metrics Implementation**: Actor lifecycle metrics and transport latency tracking
+- **TLS Refactoring**: Extracted shared conversion utilities (110 lines saved)
+- **Code Cleanup**: Fixed 10/21 architecture analysis issues
+- **TracingConfiguration Removal**: Non-functional placeholder removed
+
+⏳ **In Progress**:
+- **Remaining Code Cleanup**: 11 medium/low priority issues
+- **TLS Integration Tests**: End-to-end TLS testing scenarios
+- **Documentation Updates**: README and migration guides
 
 ⏳ **Future Enhancements**:
 1. **WebSocket Transport**: WebSocket implementation for browser compatibility
 2. **Binary Serialization**: Switch from JSON to binary format for performance
-3. **ServiceLifecycle**: Enhanced integration with ServiceGroup
-4. **Test Implementation**: Unit, integration, and performance tests
-5. **Middleware System**: Request/response middleware pipeline
-6. **Transport Selection**: Runtime transport negotiation and fallback
+3. **Performance Tests**: Throughput, latency, and memory benchmarks
+4. **Middleware System**: Request/response middleware pipeline
+5. **Additional Examples**: mTLS, metrics visualization, deployment guides
 
 ### Key Implementation Notes
 
@@ -1200,7 +1275,7 @@ struct AuthenticationMiddleware: ServerMiddleware {
 }
 ```
 
-#### メトリクスとトレーシング
+#### メトリクス設定
 
 ```swift
 @main
@@ -1209,13 +1284,6 @@ struct ObservableServer: Server {
         .enabled(
             namespace: "my_app",
             labels: ["service": "user-service", "env": "prod"]
-        )
-    }
-    
-    var tracing: TracingConfiguration {
-        .enabled(
-            serviceName: "user-service",
-            sampler: .probabilistic(0.1)
         )
     }
 }

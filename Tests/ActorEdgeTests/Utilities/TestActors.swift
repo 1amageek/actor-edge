@@ -191,30 +191,37 @@ public distributed actor TestActorImpl: TestActor {
 }
 
 /// Simple echo actor for basic tests
+/// Note: Generic methods are NOT supported in @Resolvable protocols (Swift 6.2 limitation).
+/// Use separate methods for each concrete type instead.
 @Resolvable
 public protocol EchoActor: DistributedActor where ActorSystem == ActorEdgeSystem {
-    distributed func echo<T: Codable & Sendable>(_ value: T) async throws -> T
     distributed func echoString(_ string: String) async throws -> String
+    distributed func echoInt(_ value: Int) async throws -> Int
     distributed func echoArray(_ array: [String]) async throws -> [String]
+    distributed func echoMessage(_ message: TestMessage) async throws -> TestMessage
 }
 
 public distributed actor EchoActorImpl: EchoActor {
     public typealias ActorSystem = ActorEdgeSystem
-    
+
     public init(actorSystem: ActorSystem) {
         self.actorSystem = actorSystem
     }
-    
-    public distributed func echo<T: Codable & Sendable>(_ value: T) async throws -> T {
-        return value
-    }
-    
+
     public distributed func echoString(_ string: String) async throws -> String {
         return string
     }
-    
+
+    public distributed func echoInt(_ value: Int) async throws -> Int {
+        return value
+    }
+
     public distributed func echoArray(_ array: [String]) async throws -> [String] {
         return array
+    }
+
+    public distributed func echoMessage(_ message: TestMessage) async throws -> TestMessage {
+        return message
     }
 }
 

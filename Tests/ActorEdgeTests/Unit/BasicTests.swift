@@ -13,7 +13,7 @@ struct BasicTests {
         let id2 = ActorEdgeID("custom-id")
 
         #expect(id1.description.count > 0)
-        #expect(id2.description == "custom-id")
+        #expect(id2.description == "ActorEdgeID(custom-id)")
         #expect(id1 != id2)
     }
 
