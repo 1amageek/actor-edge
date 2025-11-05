@@ -44,15 +44,3 @@ public extension Server {
         logger.info("ActorEdge server shut down gracefully")
     }
 }
-
-
-// MARK: - ServerMiddleware to gRPC Interceptor Conversion
-
-extension ServerMiddleware {
-    /// Convert ServerMiddleware to gRPC interceptor if possible
-    func asGRPCInterceptor() -> (any ServerInterceptor)? {
-        // TODO: Implement middleware to interceptor conversion
-        // For now, return nil as we haven't implemented interceptor support yet
-        return nil
-    }
-}

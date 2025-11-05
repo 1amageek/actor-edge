@@ -15,6 +15,7 @@ import Foundation
 import GRPCCore
 import GRPCNIOTransportHTTP2
 import Logging
+import Metrics
 
 /// gRPC implementation of ActorRuntime's DistributedTransport protocol
 ///
@@ -23,6 +24,7 @@ import Logging
 public final class GRPCTransport: DistributedTransport, Sendable {
     private let client: GRPCClient<HTTP2ClientTransport.Posix>
     private let logger: Logger
+    private let transportLatency: Timer
 
     /// Incoming invocations stream continuation
     private let incomingContinuation: AsyncStream<InvocationEnvelope>.Continuation
@@ -30,9 +32,15 @@ public final class GRPCTransport: DistributedTransport, Sendable {
     /// Public stream of incoming invocations
     public let incomingInvocations: AsyncStream<InvocationEnvelope>
 
-    public init(client: GRPCClient<HTTP2ClientTransport.Posix>, logger: Logger = Logger(label: "ActorEdge.GRPCTransport")) {
+    public init(
+        client: GRPCClient<HTTP2ClientTransport.Posix>,
+        logger: Logger = Logger(label: "ActorEdge.GRPCTransport"),
+        metricsNamespace: String = "actor_edge"
+    ) {
         self.client = client
         self.logger = logger
+        let metricNames = MetricNames(namespace: metricsNamespace)
+        self.transportLatency = Timer(label: metricNames.messageTransportLatencySeconds)
 
         var continuation: AsyncStream<InvocationEnvelope>.Continuation!
         self.incomingInvocations = AsyncStream { cont in
@@ -43,6 +51,9 @@ public final class GRPCTransport: DistributedTransport, Sendable {
 
     public func sendInvocation(_ envelope: InvocationEnvelope) async throws -> ResponseEnvelope {
         logger.trace("Sending invocation", metadata: ["callID": "\(envelope.callID)"])
+
+        // Record start time for latency measurement
+        let startTime = DispatchTime.now()
 
         // Create method descriptor
         let method = MethodDescriptor(
@@ -60,6 +71,12 @@ public final class GRPCTransport: DistributedTransport, Sendable {
         ) { response in
             return try response.message
         }
+
+        // Record latency
+        let endTime = DispatchTime.now()
+        let latencyNanos = endTime.uptimeNanoseconds - startTime.uptimeNanoseconds
+        let latencySeconds = Double(latencyNanos) / 1_000_000_000.0
+        transportLatency.recordSeconds(latencySeconds)
 
         logger.trace("Received response", metadata: ["callID": "\(response.callID)"])
         return response

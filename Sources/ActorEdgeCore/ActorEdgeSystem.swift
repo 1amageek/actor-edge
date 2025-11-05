@@ -14,7 +14,6 @@ import ActorRuntime
 import Distributed
 import Foundation
 import Logging
-import ServiceContextModule
 import Metrics
 
 /// The distributed actor system implementation for ActorEdge.
@@ -37,9 +36,6 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
         /// Metrics configuration
         public let metrics: MetricsConfiguration
 
-        /// Tracing configuration
-        public let tracing: TracingConfiguration
-
         /// Request timeout
         public let timeout: TimeInterval
 
@@ -51,13 +47,11 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
 
         public init(
             metrics: MetricsConfiguration = .default,
-            tracing: TracingConfiguration = .disabled,
             timeout: TimeInterval = 30,
             maxRetries: Int = 3,
             loggerLabel: String = "ActorEdge.System"
         ) {
             self.metrics = metrics
-            self.tracing = tracing
             self.timeout = timeout
             self.maxRetries = maxRetries
             self.loggerLabel = loggerLabel
@@ -85,6 +79,8 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
     // Metrics
     private let distributedCallsCounter: Counter
     private let methodInvocationsCounter: Counter
+    private let actorRegistrationsCounter: Counter
+    private let actorResolutionsCounter: Counter
     private let metricNames: MetricNames
 
     /// Create a client-side actor system with a transport
@@ -99,6 +95,8 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
         self.metricNames = MetricNames(namespace: configuration.metrics.namespace)
         self.distributedCallsCounter = Counter(label: metricNames.distributedCallsTotal)
         self.methodInvocationsCounter = Counter(label: metricNames.methodInvocationsTotal)
+        self.actorRegistrationsCounter = Counter(label: metricNames.actorRegistrationsTotal)
+        self.actorResolutionsCounter = Counter(label: metricNames.actorResolutionsTotal)
     }
 
     /// Create a server-side actor system without transport
@@ -113,10 +111,15 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
         self.metricNames = MetricNames(namespace: configuration.metrics.namespace)
         self.distributedCallsCounter = Counter(label: metricNames.distributedCallsTotal)
         self.methodInvocationsCounter = Counter(label: metricNames.methodInvocationsTotal)
+        self.actorRegistrationsCounter = Counter(label: metricNames.actorRegistrationsTotal)
+        self.actorResolutionsCounter = Counter(label: metricNames.actorResolutionsTotal)
     }
 
     public func resolve<Act>(id: ActorID, as actorType: Act.Type) throws -> Act?
         where Act: DistributedActor, Act.ID == ActorID {
+        // Update metrics
+        actorResolutionsCounter.increment()
+
         // Convert ActorEdgeID to String for ActorRuntime registry
         let actorIDString = id.description
 
@@ -157,6 +160,9 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
             "actorType": "\(Act.self)",
             "actorID": "\(actor.id)"
         ])
+
+        // Update metrics
+        actorRegistrationsCounter.increment()
 
         // Register actor in ActorRuntime registry
         if let actorID = actor.id as? ActorEdgeID {
@@ -294,24 +300,6 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
     /// Log a message (internal use)
     internal func log(_ message: String, level: Logger.Level = .debug) {
         logger.log(level: level, "\(message)")
-    }
-}
-
-// MARK: - Service Context Extension
-
-extension ServiceContext {
-    /// Extract baggage as a dictionary for trace context
-    var baggage: [String: String] {
-        // This is a placeholder implementation
-        // ServiceContext doesn't provide a way to iterate through all keys
-        // In a real implementation, you would need to:
-        // 1. Use a custom baggage type that tracks all key-value pairs
-        // 2. Or maintain a registry of known context keys
-        // 3. Or use the distributed tracing baggage APIs
-
-        // For now, return empty dictionary
-        // Tests should be updated to not rely on automatic context propagation
-        return [:]
     }
 }
 

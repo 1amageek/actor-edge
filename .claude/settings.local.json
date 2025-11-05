@@ -37,7 +37,8 @@
       "WebFetch(domain:swiftinit.org)",
       "Bash(.build/debug/SampleChat)",
       "Bash(timeout 5 swift run SampleChat)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(tree:*)"
     ],
     "deny": []
   }

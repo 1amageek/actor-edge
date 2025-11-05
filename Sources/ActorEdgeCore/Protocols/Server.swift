@@ -85,10 +85,7 @@ public protocol Server: Sendable {
     
     /// TLS configuration for secure connections
     var tls: TLSConfiguration? { get }
-    
-    /// Middleware to apply to all requests
-    var middleware: [any ServerMiddleware] { get }
-    
+
     /// Maximum number of concurrent connections
     var maxConnections: Int { get }
     
@@ -97,12 +94,9 @@ public protocol Server: Sendable {
     
     /// Maximum retry attempts
     var maxRetries: Int { get }
-    
+
     /// Metrics collection configuration
     var metrics: MetricsConfiguration { get }
-    
-    /// Distributed tracing configuration
-    var tracing: TracingConfiguration { get }
 }
 
 // MARK: - Default Implementations
@@ -116,10 +110,8 @@ public extension Server {
     var port: Int { 8000 }
     var host: String { "127.0.0.1" }
     var tls: TLSConfiguration? { nil }
-    var middleware: [any ServerMiddleware] { [] }
     var maxConnections: Int { 1000 }
     var timeout: TimeInterval { 30 }
     var maxRetries: Int { 3 }
     var metrics: MetricsConfiguration { .default }
-    var tracing: TracingConfiguration { .default }
 }

@@ -30,10 +30,12 @@ public extension ActorEdgeSystem {
     ///
     /// - Parameters:
     ///   - endpoint: The server endpoint in "host:port" format (e.g., "localhost:8000")
+    ///   - tls: Optional TLS configuration for secure connections
     ///   - configuration: System configuration including metrics, tracing, etc.
     /// - Returns: A configured ActorEdgeSystem with gRPC transport
     static func grpcClient(
         endpoint: String,
+        tls: ClientTLSConfiguration? = nil,
         configuration: Configuration = .default
     ) async throws -> ActorEdgeSystem {
         // Parse endpoint
@@ -44,17 +46,27 @@ public extension ActorEdgeSystem {
             throw RuntimeError.invalidEnvelope("Invalid endpoint format. Expected 'host:port'")
         }
 
-        // Create HTTP/2 client transport
+        // Create HTTP/2 client transport with optional TLS
+        let transportSecurity: HTTP2ClientTransport.Posix.TransportSecurity
+        if let tlsConfig = tls {
+            transportSecurity = try tlsConfig.toGRPCClientTransportSecurity()
+        } else {
+            transportSecurity = .plaintext
+        }
+
         let clientTransport = try HTTP2ClientTransport.Posix(
             target: .ipv4(host: host, port: port),
-            transportSecurity: .plaintext
+            transportSecurity: transportSecurity
         )
 
         // Create gRPC client
         let grpcClient = GRPCClient(transport: clientTransport)
 
-        // Create GRPCTransport wrapper
-        let transport = GRPCTransport(client: grpcClient)
+        // Create GRPCTransport wrapper with metrics namespace
+        let transport = GRPCTransport(
+            client: grpcClient,
+            metricsNamespace: configuration.metrics.namespace
+        )
 
         return ActorEdgeSystem(transport: transport, configuration: configuration)
     }

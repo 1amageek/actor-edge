@@ -61,7 +61,6 @@ public actor ActorEdgeService: Service {
         // Create actor system (server-side doesn't need transport for local actors)
         let systemConfig = ActorEdgeSystem.Configuration(
             metrics: configuration.server.metrics,
-            tracing: configuration.server.tracing,
             timeout: configuration.server.timeout,
             maxRetries: configuration.server.maxRetries
         )
@@ -82,15 +81,21 @@ public actor ActorEdgeService: Service {
         // Create HTTP/2 transport for gRPC
         let host = configuration.server.host
         let port = configuration.server.port
-        
+
         let transportConfig: HTTP2ServerTransport.Posix
-        if configuration.server.tls != nil {
-            // TODO: Configure TLS when grpc-swift 2.0 exposes the API
-            logger.warning("TLS configuration provided but not yet implemented")
-            transportConfig = HTTP2ServerTransport.Posix(
-                address: .ipv4(host: host, port: port),
-                transportSecurity: .plaintext
-            )
+        if let tlsConfig = configuration.server.tls {
+            // Configure TLS using grpc-swift's TLS API
+            do {
+                let grpcTLS = try tlsConfig.toGRPCTransportSecurity()
+                transportConfig = HTTP2ServerTransport.Posix(
+                    address: .ipv4(host: host, port: port),
+                    transportSecurity: grpcTLS
+                )
+                logger.info("TLS configured successfully")
+            } catch {
+                logger.error("Failed to configure TLS", metadata: ["error": "\(error)"])
+                throw error
+            }
         } else {
             transportConfig = HTTP2ServerTransport.Posix(
                 address: .ipv4(host: host, port: port),

@@ -49,23 +49,6 @@ public enum CertificateUtilities {
         return try source.load()
     }
     
-    // MARK: - Certificate Validation
-    
-    /// Validate that a certificate is currently valid (not expired)
-    public static func isCertificateValid(_ certificate: NIOSSLCertificate) -> Bool {
-        // Note: NIOSSL doesn't expose certificate details directly
-        // In production, you'd need to use Security framework or OpenSSL
-        // For now, we assume certificates are valid
-        return true
-    }
-    
-    /// Extract common name from certificate
-    public static func commonName(from certificate: NIOSSLCertificate) -> String? {
-        // Note: NIOSSL doesn't expose certificate details directly
-        // This would require using Security framework or OpenSSL
-        return nil
-    }
-    
     // MARK: - Trust Store Management
     
     /// Create trust roots from CA certificates
