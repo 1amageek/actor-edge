@@ -8,31 +8,25 @@ import Distributed
 public struct ActorEdgeID: Sendable, Hashable, Codable {
     /// The actor identifier value
     public let value: String
-    
-    /// Optional metadata for future extensibility
-    public let metadata: [String: String]
-    
+
     /// Creates a new random ActorEdgeID.
     public init() {
         // Generate short UUID (8 characters)
         self.value = UUID().uuidString.prefix(8).lowercased()
-        self.metadata = [:]
     }
-    
+
     /// Creates an ActorEdgeID from a string value.
-    public init(_ value: String, metadata: [String: String] = [:]) {
+    public init(_ value: String) {
         self.value = value
-        self.metadata = metadata
-    }
-    
-    /// The string representation of this ID.
-    public var description: String {
-        value
     }
 }
 
 // MARK: - CustomStringConvertible
-extension ActorEdgeID: CustomStringConvertible {}
+extension ActorEdgeID: CustomStringConvertible {
+    public var description: String {
+        value
+    }
+}
 
 // MARK: - ExpressibleByStringLiteral
 extension ActorEdgeID: ExpressibleByStringLiteral {

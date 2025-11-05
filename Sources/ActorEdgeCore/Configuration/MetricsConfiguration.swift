@@ -31,15 +31,6 @@ public struct MetricsConfiguration: Sendable {
     }
 }
 
-/// Pre-defined metric labels for ActorEdge
-public struct MetricLabels {
-    public static let callID = "call_id"
-    public static let actorID = "actor_id"
-    public static let method = "method"
-    public static let status = "status"
-    public static let errorType = "error_type"
-}
-
 /// Metric names used throughout ActorEdge
 public struct MetricNames: Sendable {
     private let namespace: String
@@ -56,7 +47,6 @@ public struct MetricNames: Sendable {
     
     // ActorEdgeSystem metrics
     public var distributedCallsTotal: String { "\(namespace)_distributed_calls_total" }
-    public var methodInvocationsTotal: String { "\(namespace)_method_invocations_total" }
     public var actorRegistrationsTotal: String { "\(namespace)_actor_registrations_total" }
     public var actorResolutionsTotal: String { "\(namespace)_actor_resolutions_total" }
     

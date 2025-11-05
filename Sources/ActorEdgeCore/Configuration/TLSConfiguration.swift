@@ -96,95 +96,15 @@ public struct TLSConfiguration: Sendable {
         )
     }
     
-    // MARK: - NIOSSL Conversion
-
-    /// Create NIOSSL TLS configuration for server
-    public func makeNIOSSLConfiguration() throws -> NIOSSL.TLSConfiguration {
-        let certificateChain = try certificateChainSources.map { try $0.load() }
-        let privateKey = try privateKeySource.load()
-        let trustRoots = try trustRoots.makeNIOSSLTrustRoots()
-
-        var tlsConfig = NIOSSL.TLSConfiguration.makeServerConfiguration(
-            certificateChain: certificateChain.map { .certificate($0) },
-            privateKey: .privateKey(privateKey)
-        )
-
-        tlsConfig.certificateVerification = clientCertificateVerification.niosslVerification
-        tlsConfig.trustRoots = trustRoots
-        tlsConfig.minimumTLSVersion = minimumTLSVersion.niosslVersion
-        tlsConfig.maximumTLSVersion = maximumTLSVersion.niosslVersion
-
-        // Note: NIOSSL expects cipherSuites as a String
-        // For now, we'll skip cipher suite configuration
-
-        return tlsConfig
-    }
-
     // MARK: - grpc-swift Conversion
 
     /// Convert to grpc-swift HTTP2ServerTransport.Posix.TransportSecurity
     public func toGRPCTransportSecurity() throws -> HTTP2ServerTransport.Posix.TransportSecurity {
-        // Convert certificate sources to grpc-swift format
-        let grpcCertSources: [TLSConfig.CertificateSource] = certificateChainSources.map { source in
-            switch source {
-            case .file(let path, let format):
-                let grpcFormat: TLSConfig.SerializationFormat = (format == .pem) ? .pem : .der
-                return .file(path: path, format: grpcFormat)
-            case .bytes(let data, let format):
-                let grpcFormat: TLSConfig.SerializationFormat = (format == .pem) ? .pem : .der
-                return .bytes(Array(data), format: grpcFormat)
-            case .certificate:
-                // Pre-loaded certificates not supported in grpc-swift transport
-                fatalError("Pre-loaded certificates not supported in grpc-swift transport")
-            }
-        }
-
-        // Convert private key source
-        let grpcKeySource: TLSConfig.PrivateKeySource
-        switch privateKeySource {
-        case .file(let path, let format, _):
-            let grpcFormat: TLSConfig.SerializationFormat = (format == .pem) ? .pem : .der
-            grpcKeySource = .file(path: path, format: grpcFormat)
-        case .bytes(let data, let format, _):
-            let grpcFormat: TLSConfig.SerializationFormat = (format == .pem) ? .pem : .der
-            grpcKeySource = .bytes(Array(data), format: grpcFormat)
-        case .privateKey:
-            fatalError("Pre-loaded private keys not supported in grpc-swift transport")
-        }
-
-        // Convert trust roots
-        let grpcTrustRoots: TLSConfig.TrustRootsSource
-        switch trustRoots {
-        case .systemDefault:
-            grpcTrustRoots = .systemDefault
-        case .certificates(let sources):
-            let certSources = sources.map { source -> TLSConfig.CertificateSource in
-                switch source {
-                case .file(let path, let format):
-                    let grpcFormat: TLSConfig.SerializationFormat = (format == .pem) ? .pem : .der
-                    return .file(path: path, format: grpcFormat)
-                case .bytes(let data, let format):
-                    let grpcFormat: TLSConfig.SerializationFormat = (format == .pem) ? .pem : .der
-                    return .bytes(Array(data), format: grpcFormat)
-                case .certificate:
-                    fatalError("Pre-loaded certificates not supported in grpc-swift transport")
-                }
-            }
-            grpcTrustRoots = .certificates(certSources)
-        case .none:
-            grpcTrustRoots = .systemDefault  // Fall back to system default
-        }
-
-        // Convert certificate verification
-        let grpcVerification: TLSConfig.CertificateVerification
-        switch clientCertificateVerification {
-        case .none:
-            grpcVerification = .noVerification
-        case .noHostnameVerification:
-            grpcVerification = .noHostnameVerification
-        case .fullVerification:
-            grpcVerification = .fullVerification
-        }
+        // Use conversion methods from TLSTypes
+        let grpcCertSources = certificateChainSources.map { $0.toGRPCCertificateSource() }
+        let grpcKeySource = privateKeySource.toGRPCPrivateKeySource()
+        let grpcTrustRoots = trustRoots.toGRPCTrustRootsSource()
+        let grpcVerification = clientCertificateVerification.grpcVerification
 
         // Create grpc-swift TLS config
         return .tls(
@@ -265,101 +185,19 @@ public struct ClientTLSConfiguration: Sendable {
         return ClientTLSConfiguration(trustRoots: .none)
     }
 
-    // MARK: - NIOSSL Conversion
-
-    /// Create NIOSSL TLS configuration for client
-    public func makeNIOSSLConfiguration() throws -> NIOSSL.TLSConfiguration {
-        var tlsConfig = NIOSSL.TLSConfiguration.makeClientConfiguration()
-
-        // Configure trust roots
-        tlsConfig.trustRoots = try trustRoots.makeNIOSSLTrustRoots()
-
-        // Configure certificate chain and private key for mTLS if provided
-        if let certSources = certificateChainSources, !certSources.isEmpty {
-            let certificates = try certSources.map { try $0.load() }
-            tlsConfig.certificateChain = certificates.map { .certificate($0) }
-        }
-
-        if let keySource = privateKeySource {
-            let privateKey = try keySource.load()
-            tlsConfig.privateKey = .privateKey(privateKey)
-        }
-
-        // Configure TLS versions
-        tlsConfig.minimumTLSVersion = minimumTLSVersion.niosslVersion
-        tlsConfig.maximumTLSVersion = maximumTLSVersion.niosslVersion
-
-        // Note: NIOSSL expects cipherSuites as a String
-        // For now, we'll skip cipher suite configuration
-
-        return tlsConfig
-    }
-
     // MARK: - grpc-swift Conversion
 
     /// Convert to grpc-swift HTTP2ClientTransport.Posix.TransportSecurity
     public func toGRPCClientTransportSecurity() throws -> HTTP2ClientTransport.Posix.TransportSecurity {
-        // Convert trust roots
-        let grpcTrustRoots: TLSConfig.TrustRootsSource
-        switch trustRoots {
-        case .systemDefault:
-            grpcTrustRoots = .systemDefault
-        case .certificates(let sources):
-            let certSources = sources.map { source -> TLSConfig.CertificateSource in
-                switch source {
-                case .file(let path, let format):
-                    let grpcFormat: TLSConfig.SerializationFormat = (format == .pem) ? .pem : .der
-                    return .file(path: path, format: grpcFormat)
-                case .bytes(let data, let format):
-                    let grpcFormat: TLSConfig.SerializationFormat = (format == .pem) ? .pem : .der
-                    return .bytes(Array(data), format: grpcFormat)
-                case .certificate:
-                    fatalError("Pre-loaded certificates not supported in grpc-swift transport")
-                }
-            }
-            grpcTrustRoots = .certificates(certSources)
-        case .none:
-            grpcTrustRoots = .systemDefault
-        }
+        // Use conversion methods from TLSTypes
+        let grpcTrustRoots = trustRoots.toGRPCTrustRootsSource()
 
         // Convert certificate chain and private key for mTLS if provided
-        let grpcCertSources: [TLSConfig.CertificateSource]?
-        let grpcKeySource: TLSConfig.PrivateKeySource?
-
-        if let certSources = certificateChainSources, !certSources.isEmpty {
-            grpcCertSources = certSources.map { source in
-                switch source {
-                case .file(let path, let format):
-                    let grpcFormat: TLSConfig.SerializationFormat = (format == .pem) ? .pem : .der
-                    return .file(path: path, format: grpcFormat)
-                case .bytes(let data, let format):
-                    let grpcFormat: TLSConfig.SerializationFormat = (format == .pem) ? .pem : .der
-                    return .bytes(Array(data), format: grpcFormat)
-                case .certificate:
-                    fatalError("Pre-loaded certificates not supported in grpc-swift transport")
-                }
-            }
-        } else {
-            grpcCertSources = nil
-        }
-
-        if let keySource = privateKeySource {
-            switch keySource {
-            case .file(let path, let format, _):
-                let grpcFormat: TLSConfig.SerializationFormat = (format == .pem) ? .pem : .der
-                grpcKeySource = .file(path: path, format: grpcFormat)
-            case .bytes(let data, let format, _):
-                let grpcFormat: TLSConfig.SerializationFormat = (format == .pem) ? .pem : .der
-                grpcKeySource = .bytes(Array(data), format: grpcFormat)
-            case .privateKey:
-                fatalError("Pre-loaded private keys not supported in grpc-swift transport")
-            }
-        } else {
-            grpcKeySource = nil
-        }
+        let grpcCertSources = certificateChainSources?.map { $0.toGRPCCertificateSource() }
+        let grpcKeySource = privateKeySource?.toGRPCPrivateKeySource()
 
         // If we have mTLS configuration
-        if let certChain = grpcCertSources, let privateKey = grpcKeySource {
+        if let certChain = grpcCertSources, !certChain.isEmpty, let privateKey = grpcKeySource {
             return .mTLS(
                 certificateChain: certChain,
                 privateKey: privateKey

@@ -100,25 +100,3 @@ public enum CertificateUtilities {
         )
     }
 }
-
-// MARK: - Error Types
-
-public enum CertificateError: Error, LocalizedError {
-    case invalidCertificateData
-    case noCertificatesFound
-    case certificateExpired
-    case privateKeyMismatch
-    
-    public var errorDescription: String? {
-        switch self {
-        case .invalidCertificateData:
-            return "Invalid certificate data"
-        case .noCertificatesFound:
-            return "No certificates found in file"
-        case .certificateExpired:
-            return "Certificate has expired"
-        case .privateKeyMismatch:
-            return "Private key does not match certificate"
-        }
-    }
-}

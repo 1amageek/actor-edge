@@ -1,5 +1,6 @@
 import Foundation
 import NIOSSL
+import GRPCNIOTransportHTTP2
 
 // MARK: - Certificate Source
 
@@ -11,7 +12,7 @@ public enum CertificateSource: Sendable {
     case file(String, format: SerializationFormat)
     /// Pre-loaded certificate object
     case certificate(NIOSSLCertificate)
-    
+
     /// Load the certificate
     public func load() throws -> NIOSSLCertificate {
         switch self {
@@ -22,6 +23,18 @@ public enum CertificateSource: Sendable {
             return try NIOSSLCertificate(bytes: Array(data), format: format.niosslFormat)
         case .certificate(let cert):
             return cert
+        }
+    }
+
+    /// Convert to grpc-swift TLSConfig.CertificateSource
+    func toGRPCCertificateSource() -> TLSConfig.CertificateSource {
+        switch self {
+        case .file(let path, let format):
+            return .file(path: path, format: format.grpcFormat)
+        case .bytes(let data, let format):
+            return .bytes(Array(data), format: format.grpcFormat)
+        case .certificate:
+            fatalError("Pre-loaded certificates not supported in grpc-swift transport")
         }
     }
 }
@@ -36,7 +49,7 @@ public enum PrivateKeySource: Sendable {
     case file(String, format: SerializationFormat, passphrase: String? = nil)
     /// Pre-loaded private key object
     case privateKey(NIOSSLPrivateKey)
-    
+
     /// Load the private key
     public func load() throws -> NIOSSLPrivateKey {
         switch self {
@@ -61,6 +74,18 @@ public enum PrivateKeySource: Sendable {
             return key
         }
     }
+
+    /// Convert to grpc-swift TLSConfig.PrivateKeySource
+    func toGRPCPrivateKeySource() -> TLSConfig.PrivateKeySource {
+        switch self {
+        case .file(let path, let format, _):
+            return .file(path: path, format: format.grpcFormat)
+        case .bytes(let data, let format, _):
+            return .bytes(Array(data), format: format.grpcFormat)
+        case .privateKey:
+            fatalError("Pre-loaded private keys not supported in grpc-swift transport")
+        }
+    }
 }
 
 // MARK: - Trust Roots Source
@@ -73,7 +98,7 @@ public enum TrustRootsSource: Sendable {
     case certificates([CertificateSource])
     /// No trust roots (insecure)
     case none
-    
+
     /// Convert to NIOSSL trust roots
     public func makeNIOSSLTrustRoots() throws -> NIOSSLTrustRoots? {
         switch self {
@@ -86,6 +111,18 @@ public enum TrustRootsSource: Sendable {
             return nil
         }
     }
+
+    /// Convert to grpc-swift TLSConfig.TrustRootsSource
+    func toGRPCTrustRootsSource() -> TLSConfig.TrustRootsSource {
+        switch self {
+        case .systemDefault:
+            return .systemDefault
+        case .certificates(let sources):
+            return .certificates(sources.map { $0.toGRPCCertificateSource() })
+        case .none:
+            return .systemDefault
+        }
+    }
 }
 
 // MARK: - Serialization Format
@@ -94,8 +131,18 @@ public enum TrustRootsSource: Sendable {
 public enum SerializationFormat: Sendable {
     case pem
     case der
-    
+
     var niosslFormat: NIOSSLSerializationFormats {
+        switch self {
+        case .pem:
+            return .pem
+        case .der:
+            return .der
+        }
+    }
+
+    /// Convert to grpc-swift TLSConfig.SerializationFormat
+    var grpcFormat: TLSConfig.SerializationFormat {
         switch self {
         case .pem:
             return .pem
@@ -139,12 +186,24 @@ public enum CertificateVerification: Sendable {
     case noHostnameVerification
     /// Full certificate and hostname verification
     case fullVerification
-    
+
     /// Convert to NIOSSL certificate verification
     public var niosslVerification: NIOSSL.CertificateVerification {
         switch self {
         case .none:
             return .none
+        case .noHostnameVerification:
+            return .noHostnameVerification
+        case .fullVerification:
+            return .fullVerification
+        }
+    }
+
+    /// Convert to grpc-swift TLSConfig.CertificateVerification
+    var grpcVerification: TLSConfig.CertificateVerification {
+        switch self {
+        case .none:
+            return .noVerification
         case .noHostnameVerification:
             return .noHostnameVerification
         case .fullVerification:

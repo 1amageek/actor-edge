@@ -25,11 +25,8 @@ public final class GRPCTransport: DistributedTransport, Sendable {
     private let client: GRPCClient<HTTP2ClientTransport.Posix>
     private let logger: Logger
     private let transportLatency: Timer
-
-    /// Incoming invocations stream continuation
     private let incomingContinuation: AsyncStream<InvocationEnvelope>.Continuation
 
-    /// Public stream of incoming invocations
     public let incomingInvocations: AsyncStream<InvocationEnvelope>
 
     public init(
@@ -42,11 +39,13 @@ public final class GRPCTransport: DistributedTransport, Sendable {
         let metricNames = MetricNames(namespace: metricsNamespace)
         self.transportLatency = Timer(label: metricNames.messageTransportLatencySeconds)
 
+        // Create incoming invocations stream (required by protocol but unused in client-only mode)
         var continuation: AsyncStream<InvocationEnvelope>.Continuation!
-        self.incomingInvocations = AsyncStream { cont in
+        let stream = AsyncStream<InvocationEnvelope> { cont in
             continuation = cont
         }
         self.incomingContinuation = continuation
+        self.incomingInvocations = stream
     }
 
     public func sendInvocation(_ envelope: InvocationEnvelope) async throws -> ResponseEnvelope {
@@ -90,7 +89,6 @@ public final class GRPCTransport: DistributedTransport, Sendable {
 
     public func close() async throws {
         logger.info("Closing gRPC transport")
-        incomingContinuation.finish()
         // GRPCClient doesn't have a close method in grpc-swift 2.0
         // The client will be closed when it's deallocated
     }

@@ -38,7 +38,7 @@ let package = Package(
         // Note: grpc-swift-protobuf and swift-protobuf removed - using JSON serialization for Codable types
 
         // Logging and Lifecycle
-        .package(url: "https://github.com/apple/swift-log.git", from: "1.6.3"),
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.6.4"),
         .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.8.0"),
 
         // Tracing and Context
@@ -46,7 +46,7 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-service-context.git", from: "1.2.1"),
 
         // Metrics
-        .package(url: "https://github.com/apple/swift-metrics.git", from: "2.7.0"),
+        .package(url: "https://github.com/apple/swift-metrics.git", from: "2.7.1"),
     ],
     targets: [
         // Main public API

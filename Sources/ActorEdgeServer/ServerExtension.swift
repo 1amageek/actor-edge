@@ -1,8 +1,6 @@
 import Foundation
 import ActorEdgeCore
 import ServiceLifecycle
-import NIOCore
-// import GRPCServiceLifecycle
 import GRPCCore
 import GRPCNIOTransportHTTP2
 import Logging

@@ -78,7 +78,6 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
 
     // Metrics
     private let distributedCallsCounter: Counter
-    private let methodInvocationsCounter: Counter
     private let actorRegistrationsCounter: Counter
     private let actorResolutionsCounter: Counter
     private let metricNames: MetricNames
@@ -92,11 +91,11 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
         self.registry = ActorRuntime.ActorRegistry()
 
         // Initialize metrics
-        self.metricNames = MetricNames(namespace: configuration.metrics.namespace)
-        self.distributedCallsCounter = Counter(label: metricNames.distributedCallsTotal)
-        self.methodInvocationsCounter = Counter(label: metricNames.methodInvocationsTotal)
-        self.actorRegistrationsCounter = Counter(label: metricNames.actorRegistrationsTotal)
-        self.actorResolutionsCounter = Counter(label: metricNames.actorResolutionsTotal)
+        let (names, distCalls, actorReg, actorRes) = Self.initializeMetrics(configuration)
+        self.metricNames = names
+        self.distributedCallsCounter = distCalls
+        self.actorRegistrationsCounter = actorReg
+        self.actorResolutionsCounter = actorRes
     }
 
     /// Create a server-side actor system without transport
@@ -108,11 +107,24 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
         self.registry = ActorRuntime.ActorRegistry()
 
         // Initialize metrics
-        self.metricNames = MetricNames(namespace: configuration.metrics.namespace)
-        self.distributedCallsCounter = Counter(label: metricNames.distributedCallsTotal)
-        self.methodInvocationsCounter = Counter(label: metricNames.methodInvocationsTotal)
-        self.actorRegistrationsCounter = Counter(label: metricNames.actorRegistrationsTotal)
-        self.actorResolutionsCounter = Counter(label: metricNames.actorResolutionsTotal)
+        let (names, distCalls, actorReg, actorRes) = Self.initializeMetrics(configuration)
+        self.metricNames = names
+        self.distributedCallsCounter = distCalls
+        self.actorRegistrationsCounter = actorReg
+        self.actorResolutionsCounter = actorRes
+    }
+
+    // MARK: - Private Helpers
+
+    /// Initialize metrics counters for the actor system
+    private static func initializeMetrics(_ configuration: Configuration) -> (MetricNames, Counter, Counter, Counter) {
+        let metricNames = MetricNames(namespace: configuration.metrics.namespace)
+        return (
+            metricNames,
+            Counter(label: metricNames.distributedCallsTotal),
+            Counter(label: metricNames.actorRegistrationsTotal),
+            Counter(label: metricNames.actorResolutionsTotal)
+        )
     }
 
     public func resolve<Act>(id: ActorID, as actorType: Act.Type) throws -> Act?
