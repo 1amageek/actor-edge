@@ -166,14 +166,10 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
         where Act: DistributedActor {
         // Check if we have a pre-assigned ID for this actor type
         if let preAssignedID = preAssignedIDsStorage.getNext() {
-            let id = ActorEdgeID(preAssignedID)
-            print("🔵 [ActorEdgeSystem] assignID: Using pre-assigned ID '\(preAssignedID)' -> ActorEdgeID.value='\(id.value)'")
-            return id
+            return ActorEdgeID(preAssignedID)
         }
         // Otherwise, generate a new ID
-        let id = ActorEdgeID()
-        print("🔵 [ActorEdgeSystem] assignID: Generated new random ID '\(id.value)'")
-        return id
+        return ActorEdgeID()
     }
 
     /// Sets pre-assigned IDs for actors
@@ -184,10 +180,7 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
     public func actorReady<Act>(_ actor: Act)
         where Act: DistributedActor {
         if let actorID = actor.id as? ActorEdgeID {
-            print("🟢 [ActorEdgeSystem] actorReady: type=\(Act.self), id.value='\(actorID.value)', id.description='\(actorID.description)'")
             registry.register(actor, id: actorID.value)
-        } else {
-            print("🔴 [ActorEdgeSystem] actorReady: Failed to cast actor.id to ActorEdgeID")
         }
 
         logger.info("Actor ready", metadata: [
@@ -226,15 +219,11 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
           Err: Error,
           Res: SerializationRequirement {
 
-        print("🔴 [ActorEdgeSystem] remoteCall: actor.id.value='\(actor.id.value)', target='\(target.identifier)'")
-
         // Update metrics
         distributedCallsCounter.increment()
 
         // Check if we have a local actor for this ID
-        print("🔴 [ActorEdgeSystem] remoteCall: Looking for local actor with id='\(actor.id.value)'")
         if let localActor = registry.find(id: actor.id.value) {
-            print("🟢 [ActorEdgeSystem] remoteCall: Found local actor, executing locally")
             // Local execution: call the actor directly using executeDistributedTarget
             logger.trace("Executing local call", metadata: ["actorID": "\(actor.id)", "target": "\(target.identifier)"])
 
@@ -295,13 +284,10 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
         }
 
         // Remote execution: require transport
-        print("🔵 [ActorEdgeSystem] remoteCall: No local actor, using remote transport")
         guard let transport = transport else {
-            print("🔴 [ActorEdgeSystem] remoteCall: ERROR - No transport configured!")
             throw RuntimeError.transportFailed("No transport configured")
         }
 
-        print("🔵 [ActorEdgeSystem] remoteCall: Recording target and creating envelope")
         // Record target (it's passed as parameter, not yet in encoder)
         invocation.recordTarget(target)
 
@@ -311,15 +297,12 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
             senderID: nil
         )
 
-        print("🔵 [ActorEdgeSystem] remoteCall: Sending invocation through transport, callID='\(invocationEnvelope.callID)'")
         // Send through transport and get response
         let responseEnvelope = try await transport.sendInvocation(invocationEnvelope)
-        print("🟢 [ActorEdgeSystem] remoteCall: Received response from transport")
 
         // Extract result from response
         switch responseEnvelope.result {
         case .success(let data):
-            print("🟢 [ActorEdgeSystem] remoteCall: Success response, decoding result")
             // Deserialize the result
             let decoder = JSONDecoder()
             return try decoder.decode(Res.self, from: data)
@@ -477,15 +460,12 @@ private final class PreAssignedIDStorage: @unchecked Sendable {
         defer { lock.unlock() }
         // Convert ActorEdgeID to String internally using .value
         ids = newIDs.map(\.value)
-        print("🟡 [PreAssignedIDStorage] setIDs: Stored \(ids.count) IDs: \(ids)")
     }
 
     func getNext() -> String? {
         lock.lock()
         defer { lock.unlock() }
-        let next = ids.isEmpty ? nil : ids.removeFirst()
-        print("🟡 [PreAssignedIDStorage] getNext: Returning '\(next ?? "nil")', remaining: \(ids)")
-        return next
+        return ids.isEmpty ? nil : ids.removeFirst()
     }
 }
 

@@ -38,7 +38,10 @@
       "Bash(.build/debug/SampleChat)",
       "Bash(timeout 5 swift run SampleChat)",
       "Bash(cat:*)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(pkill:*)",
+      "Bash(openssl x509:*)",
+      "Bash(openssl verify:*)"
     ],
     "deny": []
   }

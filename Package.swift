@@ -100,7 +100,7 @@ let package = Package(
                 "ActorEdgeClient"
             ],
             resources: [
-                .copy("Fixtures/certificates")
+                .copy("Fixtures")
             ]
         ),
     ]

@@ -14,7 +14,7 @@ struct TrueRemoteErrorTests {
         let actorID = ActorEdgeID("error-throwing-actor")
 
         let server = SimpleTestServer(
-            port: 50101,
+            port: 60101,
             actors: [{ TestActorImpl(actorSystem: $0) }],
             actorIDs: [actorID]
         )
@@ -23,7 +23,7 @@ struct TrueRemoteErrorTests {
         defer { Task { try? await lifecycle.stop() } }
 
         let clientLifecycle = ClientLifecycleManager()
-        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:50101")
+        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:60101")
         defer { Task { await clientLifecycle.stop() } }
 
         let remoteActor = try $TestActor.resolve(id: serverActorIDs[0], using: clientSystem)
@@ -54,13 +54,13 @@ struct TrueRemoteErrorTests {
     @Test("Actor not found over gRPC")
     func testActorNotFoundOverGRPC() async throws {
         // Don't register any actors on server
-        let server = SimpleTestServer(port: 50102, actors: [])
+        let server = SimpleTestServer(port: 60102, actors: [])
         let lifecycle = ServerLifecycleManager()
-        try await lifecycle.start(server)
+        _ = try await lifecycle.start(server)
         defer { Task { try? await lifecycle.stop() } }
 
         let clientLifecycle = ClientLifecycleManager()
-        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:50102")
+        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:60102")
         defer { Task { await clientLifecycle.stop() } }
 
         // Try to resolve non-existent actor
@@ -73,7 +73,7 @@ struct TrueRemoteErrorTests {
         }
 
         do {
-            try await remoteActor.incrementCounter()
+            _ = try await remoteActor.incrementCounter()
             Issue.record("Should have thrown actor not found error")
         } catch let error as RuntimeError {
             // Should get actorNotFound or executionFailed from server
@@ -97,7 +97,7 @@ struct TrueRemoteErrorTests {
         let actorID = ActorEdgeID("sequential-errors-actor")
 
         let server = SimpleTestServer(
-            port: 50103,
+            port: 60103,
             actors: [{ TestActorImpl(actorSystem: $0) }],
             actorIDs: [actorID]
         )
@@ -106,7 +106,7 @@ struct TrueRemoteErrorTests {
         defer { Task { try? await lifecycle.stop() } }
 
         let clientLifecycle = ClientLifecycleManager()
-        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:50103")
+        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:60103")
         defer { Task { await clientLifecycle.stop() } }
 
         let remoteActor = try $TestActor.resolve(id: serverActorIDs[0], using: clientSystem)
@@ -130,7 +130,7 @@ struct TrueRemoteErrorTests {
         let actorID = ActorEdgeID("mixed-calls-actor")
 
         let server = SimpleTestServer(
-            port: 50104,
+            port: 60104,
             actors: [{ TestActorImpl(actorSystem: $0) }],
             actorIDs: [actorID]
         )
@@ -139,7 +139,7 @@ struct TrueRemoteErrorTests {
         defer { Task { try? await lifecycle.stop() } }
 
         let clientLifecycle = ClientLifecycleManager()
-        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:50104")
+        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:60104")
         defer { Task { await clientLifecycle.stop() } }
 
         let remoteActor = try $TestActor.resolve(id: serverActorIDs[0], using: clientSystem)

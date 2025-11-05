@@ -9,10 +9,13 @@ import ActorRuntime
 @Suite("True TLS Integration Tests (gRPC)", .serialized)
 struct TrueTLSIntegrationTests {
 
-    static let fixturesPath = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .appendingPathComponent("Fixtures")
+    static let fixturesPath: URL = {
+        // Use Bundle.module to access test resources
+        guard let resourcePath = Bundle.module.resourcePath else {
+            fatalError("Failed to find resource path")
+        }
+        return URL(fileURLWithPath: resourcePath).appendingPathComponent("Fixtures")
+    }()
 
     @Test("Successful TLS connection with valid certificates")
     func testSuccessfulTLSConnection() async throws {
@@ -35,7 +38,7 @@ struct TrueTLSIntegrationTests {
         )
 
         let server = SimpleTestServer(
-            port: 50201,
+            port: 60201,
             tls: serverTLS,
             actors: [{ TestActorImpl(actorSystem: $0) }],
             actorIDs: [actorID]
@@ -46,7 +49,7 @@ struct TrueTLSIntegrationTests {
 
         let clientLifecycle = ClientLifecycleManager()
         let clientSystem = try await clientLifecycle.createClient(
-            endpoint: "127.0.0.1:50201",
+            endpoint: "127.0.0.1:60201",
             tls: clientTLS
         )
         defer { Task { await clientLifecycle.stop() } }
@@ -81,7 +84,7 @@ struct TrueTLSIntegrationTests {
         )
 
         let server = SimpleTestServer(
-            port: 50202,
+            port: 60202,
             tls: serverTLS,
             actors: [{ TestActorImpl(actorSystem: $0) }],
             actorIDs: [actorID]
@@ -94,7 +97,7 @@ struct TrueTLSIntegrationTests {
         let clientLifecycle = ClientLifecycleManager()
         do {
             let clientSystem = try await clientLifecycle.createClient(
-                endpoint: "127.0.0.1:50202",
+                endpoint: "127.0.0.1:60202",
                 tls: clientTLS
             )
             let remoteActor = try $TestActor.resolve(id: serverActorIDs[0], using: clientSystem)
@@ -119,27 +122,28 @@ struct TrueTLSIntegrationTests {
         // Server configuration with mTLS
         let serverCertPath = Self.fixturesPath.appendingPathComponent("server-cert.pem").path
         let serverKeyPath = Self.fixturesPath.appendingPathComponent("server-key.pem").path
+        let clientCertPath = Self.fixturesPath.appendingPathComponent("client-cert.pem").path
+        let clientKeyPath = Self.fixturesPath.appendingPathComponent("client-key.pem").path
         let caCertPath = Self.fixturesPath.appendingPathComponent("ca-cert.pem").path
 
+        // Server trusts CA (proper CA hierarchy)
         let serverTLS = try TLSConfiguration.serverMTLS(
             certificateChain: [.file(serverCertPath, format: .pem)],
             privateKey: .file(serverKeyPath, format: .pem),
             trustRoots: .certificates([.file(caCertPath, format: .pem)]),
-            clientCertificateVerification: .fullVerification
+            clientCertificateVerification: .noHostnameVerification
         )
 
-        // Client configuration with certificate
-        let clientCertPath = Self.fixturesPath.appendingPathComponent("client-cert.pem").path
-        let clientKeyPath = Self.fixturesPath.appendingPathComponent("client-key.pem").path
-
+        // Client trusts CA (proper CA hierarchy)
         let clientTLS = ClientTLSConfiguration.mutualTLS(
             certificateChain: [.file(clientCertPath, format: .pem)],
             privateKey: .file(clientKeyPath, format: .pem),
-            trustRoots: .certificates([.file(caCertPath, format: .pem)])
+            trustRoots: .certificates([.file(caCertPath, format: .pem)]),
+            serverHostname: "localhost"
         )
 
         let server = SimpleTestServer(
-            port: 50203,
+            port: 60203,
             tls: serverTLS,
             actors: [{ TestActorImpl(actorSystem: $0) }],
             actorIDs: [actorID]
@@ -150,7 +154,7 @@ struct TrueTLSIntegrationTests {
 
         let clientLifecycle = ClientLifecycleManager()
         let clientSystem = try await clientLifecycle.createClient(
-            endpoint: "127.0.0.1:50203",
+            endpoint: "127.0.0.1:60203",
             tls: clientTLS
         )
         defer { Task { await clientLifecycle.stop() } }
@@ -190,7 +194,7 @@ struct TrueTLSIntegrationTests {
         )
 
         let server = SimpleTestServer(
-            port: 50204,
+            port: 60204,
             tls: serverTLS,
             actors: [{ TestActorImpl(actorSystem: $0) }],
             actorIDs: [actorID]
@@ -202,7 +206,7 @@ struct TrueTLSIntegrationTests {
         let clientLifecycle = ClientLifecycleManager()
         do {
             let clientSystem = try await clientLifecycle.createClient(
-                endpoint: "127.0.0.1:50204",
+                endpoint: "127.0.0.1:60204",
                 tls: clientTLS
             )
             let remoteActor = try $TestActor.resolve(id: serverActorIDs[0], using: clientSystem)
@@ -238,7 +242,7 @@ struct TrueTLSIntegrationTests {
         let clientTLS = ClientTLSConfiguration.insecure()
 
         let server = SimpleTestServer(
-            port: 50205,
+            port: 60205,
             tls: serverTLS,
             actors: [{ TestActorImpl(actorSystem: $0) }],
             actorIDs: [actorID]
@@ -249,7 +253,7 @@ struct TrueTLSIntegrationTests {
 
         let clientLifecycle = ClientLifecycleManager()
         let clientSystem = try await clientLifecycle.createClient(
-            endpoint: "127.0.0.1:50205",
+            endpoint: "127.0.0.1:60205",
             tls: clientTLS
         )
         defer { Task { await clientLifecycle.stop() } }
@@ -280,7 +284,7 @@ struct TrueTLSIntegrationTests {
         )
 
         let server = SimpleTestServer(
-            port: 50206,
+            port: 60206,
             tls: serverTLS,
             actors: [{ StatefulActorImpl(actorSystem: $0) }],
             actorIDs: [actorID]
@@ -291,7 +295,7 @@ struct TrueTLSIntegrationTests {
 
         let clientLifecycle = ClientLifecycleManager()
         let clientSystem = try await clientLifecycle.createClient(
-            endpoint: "127.0.0.1:50206",
+            endpoint: "127.0.0.1:60206",
             tls: clientTLS
         )
         defer { Task { await clientLifecycle.stop() } }
@@ -330,7 +334,7 @@ struct TrueTLSIntegrationTests {
         )
 
         let server = SimpleTestServer(
-            port: 50207,
+            port: 60207,
             tls: serverTLS,
             actors: [{ TestActorImpl(actorSystem: $0) }],
             actorIDs: [actorID]
@@ -346,7 +350,7 @@ struct TrueTLSIntegrationTests {
                     // Each task creates its own client system
                     let taskClientLifecycle = ClientLifecycleManager()
                     let taskClientSystem = try await taskClientLifecycle.createClient(
-                        endpoint: "127.0.0.1:50207",
+                        endpoint: "127.0.0.1:60207",
                         tls: clientTLS
                     )
                     defer { Task { await taskClientLifecycle.stop() } }

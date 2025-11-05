@@ -76,13 +76,10 @@ public actor ActorEdgeService: Service {
         actorSystem = system
         
         // Set pre-assigned IDs before creating actors
-        print("🟣 [ActorEdgeService] Setting pre-assigned IDs: \(configuration.server.actorIDs.map { "'\($0.value)'" })")
         system.setPreAssignedIDs(configuration.server.actorIDs)
 
         // Create actors - they will use the pre-assigned IDs
-        print("🟣 [ActorEdgeService] Creating actors...")
         let actors = configuration.server.actors(actorSystem: system)
-        print("🟣 [ActorEdgeService] Created \(actors.count) actors")
         
         // Log the actors that were created
         for actor in actors {
@@ -115,11 +112,9 @@ public actor ActorEdgeService: Service {
         }
         
         // Create distributed actor service
-        print("🟣 [ActorEdgeService] Creating DistributedActorService...")
         let distributedActorService = DistributedActorService(system: system)
 
         // Create gRPC server
-        print("🟣 [ActorEdgeService] Creating GRPCServer on \(host):\(port)...")
         let grpc = GRPCServer(transport: transportConfig, services: [distributedActorService])
         grpcServer = grpc
 
@@ -131,25 +126,19 @@ public actor ActorEdgeService: Service {
         ])
 
         // Start the gRPC server
-        print("🟣 [ActorEdgeService] Starting gRPC server with grpc.serve()...")
-        do {
-            // Get listening address once server starts
-            async let address = grpc.listeningAddress
-            async let serverTask: Void = grpc.serve()
-
-            // Wait for listening address (confirms server is ready)
-            if let addr = try await address {
-                _listeningAddress = "\(addr)"
-                print("🟢 [ActorEdgeService] gRPC server listening on \(addr)")
-                logger.info("gRPC server listening", metadata: ["address": "\(addr)"])
+        // Start a task to capture listening address
+        Task {
+            if let address = try? await grpc.listeningAddress {
+                self._listeningAddress = "\(address)"
+                self.logger.info("gRPC server listening", metadata: ["address": "\(address)"])
             }
+        }
 
-            // This will block until server stops
-            try await serverTask
-            print("🟣 [ActorEdgeService] gRPC server serve() completed (server stopped)")
+        // Run server (blocks until shutdown)
+        do {
+            try await grpc.serve()
         } catch {
-            print("🔴 [ActorEdgeService] gRPC server error: \(error)")
-            self.logger.error("gRPC server error", metadata: ["error": "\(error)"])
+            logger.error("gRPC server error", metadata: ["error": "\(error)"])
             throw error
         }
     }

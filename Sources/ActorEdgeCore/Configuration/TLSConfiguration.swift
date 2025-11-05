@@ -29,7 +29,7 @@ public struct TLSConfiguration: Sendable {
         cipherSuites: [NIOTLSCipher]? = nil,
         minimumTLSVersion: TLSVersion = .tlsv12,
         maximumTLSVersion: TLSVersion = .tlsv13,
-        requireALPN: Bool = true
+        requireALPN: Bool = false
     ) {
         self.certificateChainSources = certificateChainSources
         self.privateKeySource = privateKeySource
@@ -103,14 +103,25 @@ public struct TLSConfiguration: Sendable {
         let grpcTrustRoots = try trustRoots.toGRPCTrustRootsSource()
         let grpcVerification = clientCertificateVerification.grpcVerification
 
-        // Create grpc-swift TLS config
-        return .tls(
-            certificateChain: grpcCertSources,
-            privateKey: grpcKeySource
-        ) { config in
-            config.clientCertificateVerification = grpcVerification
-            config.trustRoots = grpcTrustRoots
-            config.requireALPN = requireALPN
+        // Use mTLS if client certificate verification is enabled
+        if grpcVerification != .noVerification {
+            return .mTLS(
+                certificateChain: grpcCertSources,
+                privateKey: grpcKeySource
+            ) { config in
+                config.clientCertificateVerification = grpcVerification
+                config.trustRoots = grpcTrustRoots
+                config.requireALPN = requireALPN
+            }
+        } else {
+            // Regular TLS
+            return .tls(
+                certificateChain: grpcCertSources,
+                privateKey: grpcKeySource
+            ) { config in
+                config.trustRoots = grpcTrustRoots
+                config.requireALPN = requireALPN
+            }
         }
     }
 }
@@ -172,12 +183,14 @@ public struct ClientTLSConfiguration: Sendable {
     public static func mutualTLS(
         certificateChain: [CertificateSource],
         privateKey: PrivateKeySource,
-        trustRoots: TrustRootsSource = .systemDefault
+        trustRoots: TrustRootsSource = .systemDefault,
+        serverHostname: String? = nil
     ) -> ClientTLSConfiguration {
         return ClientTLSConfiguration(
             trustRoots: trustRoots,
             certificateChainSources: certificateChain,
-            privateKeySource: privateKey
+            privateKeySource: privateKey,
+            serverHostname: serverHostname
         )
     }
     

@@ -9,16 +9,21 @@ import Metrics
 @Suite("True Metrics Validation Tests (gRPC)", .serialized)
 struct TrueMetricsValidationTests {
 
+    // Shared test metrics instance
+    static let testMetrics: TestMetrics = {
+        let metrics = TestMetrics()
+        MetricsSystem.bootstrap(metrics)
+        return metrics
+    }()
+
+    init() {
+        // Force initialization of testMetrics before any tests run
+        _ = Self.testMetrics
+    }
+
     @Test("Metrics record distributed calls over gRPC")
     func testMetricsRecordDistributedCallsOverGRPC() async throws {
         let actorID = ActorEdgeID("metrics-grpc-actor")
-        print("🔶 [TEST] Created actorID with value: '\(actorID.value)'")
-
-        // Bootstrap metrics once for all tests
-        let testMetrics = TestMetrics()
-        do {
-            MetricsSystem.bootstrap(testMetrics)
-        }
 
         // Configure metrics with correct namespace
         let metricsConfig = MetricsConfiguration(
@@ -28,27 +33,22 @@ struct TrueMetricsValidationTests {
         )
 
         let server = SimpleTestServer(
-            port: 50301,
+            port: 60301,
             actors: [{ TestActorImpl(actorSystem: $0) }],
             actorIDs: [actorID],
             metrics: metricsConfig
         )
-        print("🔶 [TEST] Starting server with actorIDs: \(server.actorIDs.map { "'\($0.value)'" })")
         let lifecycle = ServerLifecycleManager()
         let serverActorIDs = try await lifecycle.start(server)
-        print("🔶 [TEST] Server started, returned IDs: \(serverActorIDs.map { "'\($0.value)'" })")
         defer { Task { try? await lifecycle.stop() } }
 
-        print("🔶 [TEST] Creating gRPC client...")
         let clientLifecycle = ClientLifecycleManager()
         let clientConfig = ActorEdgeSystem.Configuration(
             metrics: metricsConfig  // Use same metrics config as server
         )
-        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:50301", configuration: clientConfig)
+        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:60301", configuration: clientConfig)
         defer { Task { await clientLifecycle.stop() } }
-        print("🔶 [TEST] Resolving actor with ID: '\(serverActorIDs[0].value)'")
         let remoteActor = try $TestActor.resolve(id: serverActorIDs[0], using: clientSystem)
-        print("🔶 [TEST] Actor resolved successfully")
 
         // Make 5 calls over gRPC
         for _ in 0..<5 {
@@ -59,7 +59,7 @@ struct TrueMetricsValidationTests {
         try await Task.sleep(for: .milliseconds(100))
 
         // Verify counter was incremented
-        let counter = testMetrics.getCounter(label: "grpc_test_distributed_calls_total")
+        let counter = Self.testMetrics.getCounter(label: "grpc_test_distributed_calls_total")
         #expect(counter != nil, "Metrics counter should exist")
 
         if let counter = counter {
@@ -73,11 +73,6 @@ struct TrueMetricsValidationTests {
 
     @Test("Metrics record actor registrations")
     func testMetricsRecordActorRegistrations() async throws {
-        let testMetrics = TestMetrics()
-        do {
-            MetricsSystem.bootstrap(testMetrics)
-        } catch {}
-
         let config = ActorEdgeSystem.Configuration(
             metrics: MetricsConfiguration(enabled: true, namespace: "reg_test", labels: [:])
         )
@@ -91,7 +86,7 @@ struct TrueMetricsValidationTests {
         // Wait for registration
         try await Task.sleep(for: .milliseconds(100))
 
-        let counter = testMetrics.getCounter(label: "reg_test_actor_registrations_total")
+        let counter = Self.testMetrics.getCounter(label: "reg_test_actor_registrations_total")
         if let counter = counter {
             counter.assertIncremented()
             #expect(counter.value >= 3, "Should have at least 3 actor registrations")
@@ -105,11 +100,6 @@ struct TrueMetricsValidationTests {
     func testMetricsRecordActorResolutions() async throws {
         let actorID = ActorEdgeID("metrics-resolution-actor")
 
-        let testMetrics = TestMetrics()
-        do {
-            MetricsSystem.bootstrap(testMetrics)
-        } catch {}
-
         let metricsConfig = MetricsConfiguration(
             enabled: true,
             namespace: "resolve_test",
@@ -117,7 +107,7 @@ struct TrueMetricsValidationTests {
         )
 
         let server = SimpleTestServer(
-            port: 50302,
+            port: 60302,
             actors: [{ TestActorImpl(actorSystem: $0) }],
             actorIDs: [actorID],
             metrics: metricsConfig
@@ -128,7 +118,7 @@ struct TrueMetricsValidationTests {
 
         let clientLifecycle = ClientLifecycleManager()
         let clientConfig = ActorEdgeSystem.Configuration(metrics: metricsConfig)
-        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:50302", configuration: clientConfig)
+        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:60302", configuration: clientConfig)
         defer { Task { await clientLifecycle.stop() } }
 
         // Resolve same actor multiple times from client
@@ -138,7 +128,7 @@ struct TrueMetricsValidationTests {
 
         try await Task.sleep(for: .milliseconds(100))
 
-        let counter = testMetrics.getCounter(label: "resolve_test_actor_resolutions_total")
+        let counter = Self.testMetrics.getCounter(label: "resolve_test_actor_resolutions_total")
         if let counter = counter {
             counter.assertIncremented()
         }
@@ -150,11 +140,6 @@ struct TrueMetricsValidationTests {
     func testMetricsWithCustomLabels() async throws {
         let actorID = ActorEdgeID("metrics-custom-labels-actor")
 
-        let testMetrics = TestMetrics()
-        do {
-            MetricsSystem.bootstrap(testMetrics)
-        } catch {}
-
         let metricsConfig = MetricsConfiguration(
             enabled: true,
             namespace: "custom_label_test",
@@ -162,7 +147,7 @@ struct TrueMetricsValidationTests {
         )
 
         let server = SimpleTestServer(
-            port: 50303,
+            port: 60303,
             actors: [{ TestActorImpl(actorSystem: $0) }],
             actorIDs: [actorID],
             metrics: metricsConfig
@@ -173,7 +158,7 @@ struct TrueMetricsValidationTests {
 
         let clientLifecycle = ClientLifecycleManager()
         let clientConfig = ActorEdgeSystem.Configuration(metrics: metricsConfig)
-        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:50303", configuration: clientConfig)
+        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:60303", configuration: clientConfig)
         defer { Task { await clientLifecycle.stop() } }
 
         let remoteActor = try $TestActor.resolve(id: serverActorIDs[0], using: clientSystem)
@@ -183,7 +168,7 @@ struct TrueMetricsValidationTests {
         try await Task.sleep(for: .milliseconds(100))
 
         // Verify metrics have correct namespace
-        let counter = testMetrics.getCounter(label: "custom_label_test_distributed_calls_total")
+        let counter = Self.testMetrics.getCounter(label: "custom_label_test_distributed_calls_total")
         #expect(counter != nil, "Counter with custom namespace should exist")
 
         if let counter = counter {
@@ -197,11 +182,6 @@ struct TrueMetricsValidationTests {
     func testMetricsConcurrentGRPC() async throws {
         let actorID = ActorEdgeID("metrics-concurrent-actor")
 
-        let testMetrics = TestMetrics()
-        do {
-            MetricsSystem.bootstrap(testMetrics)
-        } catch {}
-
         let metricsConfig = MetricsConfiguration(
             enabled: true,
             namespace: "concurrent_test",
@@ -209,7 +189,7 @@ struct TrueMetricsValidationTests {
         )
 
         let server = SimpleTestServer(
-            port: 50304,
+            port: 60304,
             actors: [{ TestActorImpl(actorSystem: $0) }],
             actorIDs: [actorID],
             metrics: metricsConfig
@@ -220,7 +200,7 @@ struct TrueMetricsValidationTests {
 
         let clientLifecycle = ClientLifecycleManager()
         let clientConfig = ActorEdgeSystem.Configuration(metrics: metricsConfig)
-        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:50304", configuration: clientConfig)
+        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:60304", configuration: clientConfig)
         defer { Task { await clientLifecycle.stop() } }
 
         let remoteActor = try $TestActor.resolve(id: serverActorIDs[0], using: clientSystem)
@@ -239,7 +219,7 @@ struct TrueMetricsValidationTests {
         try await Task.sleep(for: .milliseconds(200))
 
         // Check counter - should be at least 20
-        let counter = testMetrics.getCounter(label: "concurrent_test_distributed_calls_total")
+        let counter = Self.testMetrics.getCounter(label: "concurrent_test_distributed_calls_total")
         if let counter = counter {
             #expect(counter.value >= 20, "Should have recorded at least 20 concurrent calls")
         }
@@ -251,11 +231,6 @@ struct TrueMetricsValidationTests {
     func testMetricsRecordErrors() async throws {
         let actorID = ActorEdgeID("metrics-errors-actor")
 
-        let testMetrics = TestMetrics()
-        do {
-            MetricsSystem.bootstrap(testMetrics)
-        } catch {}
-
         let metricsConfig = MetricsConfiguration(
             enabled: true,
             namespace: "error_test",
@@ -263,7 +238,7 @@ struct TrueMetricsValidationTests {
         )
 
         let server = SimpleTestServer(
-            port: 50305,
+            port: 60305,
             actors: [{ TestActorImpl(actorSystem: $0) }],
             actorIDs: [actorID],
             metrics: metricsConfig
@@ -274,7 +249,7 @@ struct TrueMetricsValidationTests {
 
         let clientLifecycle = ClientLifecycleManager()
         let clientConfig = ActorEdgeSystem.Configuration(metrics: metricsConfig)
-        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:50305", configuration: clientConfig)
+        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:60305", configuration: clientConfig)
         defer { Task { await clientLifecycle.stop() } }
 
         let remoteActor = try $TestActor.resolve(id: serverActorIDs[0], using: clientSystem)
@@ -291,7 +266,7 @@ struct TrueMetricsValidationTests {
         try await Task.sleep(for: .milliseconds(100))
 
         // Verify error counter if it exists
-        let errorCounter = testMetrics.getCounter(label: "error_test_distributed_errors_total")
+        let errorCounter = Self.testMetrics.getCounter(label: "error_test_distributed_errors_total")
         if let errorCounter = errorCounter {
             errorCounter.assertIncremented()
         }
@@ -303,11 +278,6 @@ struct TrueMetricsValidationTests {
     func testMetricsLatencyTracking() async throws {
         let actorID = ActorEdgeID("metrics-latency-actor")
 
-        let testMetrics = TestMetrics()
-        do {
-            MetricsSystem.bootstrap(testMetrics)
-        } catch {}
-
         let metricsConfig = MetricsConfiguration(
             enabled: true,
             namespace: "latency_test",
@@ -315,7 +285,7 @@ struct TrueMetricsValidationTests {
         )
 
         let server = SimpleTestServer(
-            port: 50306,
+            port: 60306,
             actors: [{ TestActorImpl(actorSystem: $0) }],
             actorIDs: [actorID],
             metrics: metricsConfig
@@ -326,7 +296,7 @@ struct TrueMetricsValidationTests {
 
         let clientLifecycle = ClientLifecycleManager()
         let clientConfig = ActorEdgeSystem.Configuration(metrics: metricsConfig)
-        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:50306", configuration: clientConfig)
+        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:60306", configuration: clientConfig)
         defer { Task { await clientLifecycle.stop() } }
 
         let remoteActor = try $TestActor.resolve(id: serverActorIDs[0], using: clientSystem)
@@ -339,7 +309,7 @@ struct TrueMetricsValidationTests {
         try await Task.sleep(for: .milliseconds(100))
 
         // Check if latency timer exists
-        let timer = testMetrics.getTimer(label: "latency_test_distributed_call_latency")
+        let timer = Self.testMetrics.getTimer(label: "latency_test_distributed_call_latency")
         if let timer = timer {
             timer.assertRecorded()
             #expect(timer.count >= 10, "Should have recorded latency for at least 10 calls")
@@ -352,11 +322,6 @@ struct TrueMetricsValidationTests {
     func testMetricsSurviveErrors() async throws {
         let actorID = ActorEdgeID("metrics-survive-errors-actor")
 
-        let testMetrics = TestMetrics()
-        do {
-            MetricsSystem.bootstrap(testMetrics)
-        } catch {}
-
         let metricsConfig = MetricsConfiguration(
             enabled: true,
             namespace: "survive_test",
@@ -364,7 +329,7 @@ struct TrueMetricsValidationTests {
         )
 
         let server = SimpleTestServer(
-            port: 50307,
+            port: 60307,
             actors: [{ TestActorImpl(actorSystem: $0) }],
             actorIDs: [actorID],
             metrics: metricsConfig
@@ -375,7 +340,7 @@ struct TrueMetricsValidationTests {
 
         let clientLifecycle = ClientLifecycleManager()
         let clientConfig = ActorEdgeSystem.Configuration(metrics: metricsConfig)
-        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:50307", configuration: clientConfig)
+        let clientSystem = try await clientLifecycle.createClient(endpoint: "127.0.0.1:60307", configuration: clientConfig)
         defer { Task { await clientLifecycle.stop() } }
 
         let remoteActor = try $TestActor.resolve(id: serverActorIDs[0], using: clientSystem)
@@ -392,7 +357,7 @@ struct TrueMetricsValidationTests {
         try await Task.sleep(for: .milliseconds(100))
 
         // Metrics should reflect all calls
-        let counter = testMetrics.getCounter(label: "survive_test_distributed_calls_total")
+        let counter = Self.testMetrics.getCounter(label: "survive_test_distributed_calls_total")
         if let counter = counter {
             #expect(counter.value >= 2, "Should have at least 2 successful calls")
         }
