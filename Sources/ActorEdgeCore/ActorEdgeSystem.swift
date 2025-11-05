@@ -440,6 +440,32 @@ public final class ActorEdgeSystem: DistributedActorSystem, Sendable {
         return registry
     }
 
+    // MARK: - Lifecycle Management
+
+    /// Gracefully shutdown the actor system and close transport connections.
+    ///
+    /// This method should be called when the actor system is no longer needed to ensure
+    /// proper cleanup of resources, especially for client-side systems with active transport connections.
+    ///
+    /// Example:
+    /// ```swift
+    /// let system = try await ActorEdgeSystem.grpcClient(endpoint: "localhost:8000")
+    /// // ... use the system ...
+    /// try await system.shutdown()
+    /// ```
+    ///
+    /// - Throws: Any errors encountered during transport closure
+    public func shutdown() async throws {
+        logger.info("Shutting down ActorEdgeSystem")
+
+        // Close transport connection if present
+        if let transport = transport {
+            try await transport.close()
+        }
+
+        logger.info("ActorEdgeSystem shutdown complete")
+    }
+
     // MARK: - Logging
 
     /// Log a message (internal use)

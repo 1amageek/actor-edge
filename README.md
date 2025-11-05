@@ -614,45 +614,97 @@ struct MultiServiceServer: Server {
 }
 ```
 
-### Client Connection Management
+### Client Connection Lifecycle
+
+ActorEdge automatically manages gRPC connections. The `grpcClient()` method starts connection
+management in the background and returns when the connection is ready.
+
+#### Basic Usage
+
+```swift
+import ActorEdge
+
+// Create client - connection starts automatically
+let system = try await ActorEdgeSystem.grpcClient(
+    endpoint: "api.example.com:443",
+    tls: .systemDefault()
+)
+
+// Use the system
+let service = try $UserService.resolve(id: ActorEdgeID("users"), using: system)
+let user = try await service.getUser(id: "123")
+
+// Shutdown when done - IMPORTANT for proper resource cleanup
+try await system.shutdown()
+```
+
+#### Connection Manager Pattern (Recommended for Production)
+
+For production applications, use a connection manager to handle connection lifecycle:
 
 ```swift
 import ActorEdge
 
 actor ConnectionManager {
     private var system: ActorEdgeSystem?
+    private let endpoint: String
+    private let tlsConfig: ClientTLSConfiguration?
 
-    func connect(endpoint: String) async throws -> ActorEdgeSystem {
+    init(endpoint: String, tls: ClientTLSConfiguration? = nil) {
+        self.endpoint = endpoint
+        self.tlsConfig = tls
+    }
+
+    func connect() async throws -> ActorEdgeSystem {
         if let existing = system {
             return existing
         }
 
         let newSystem = try await ActorEdgeSystem.grpcClient(
             endpoint: endpoint,
-            tls: .systemDefault()
+            tls: tlsConfig
         )
 
         system = newSystem
         return newSystem
     }
 
-    func disconnect() async throws {
+    func shutdown() async throws {
         guard let system = system else { return }
         try await system.shutdown()
         self.system = nil
     }
+
+    deinit {
+        // Warning: deinit cannot be async
+        // Ensure shutdown() is called before ConnectionManager is deallocated
+    }
 }
 
 // Usage
-let connectionManager = ConnectionManager()
-let system = try await connectionManager.connect(endpoint: "api.example.com:443")
+let connectionManager = ConnectionManager(
+    endpoint: "api.example.com:443",
+    tls: .systemDefault()
+)
 
+let system = try await connectionManager.connect()
 let userService = try $UserService.resolve(id: ActorEdgeID("users"), using: system)
 let chatService = try $ChatService.resolve(id: ActorEdgeID("chat"), using: system)
 
-// When done
-try await connectionManager.disconnect()
+// Use services...
+let user = try await userService.getUser(id: "123")
+
+// Cleanup when done
+try await connectionManager.shutdown()
 ```
+
+#### Important Notes
+
+- ✅ **Automatic Connection**: `grpcClient()` starts `runConnections()` in background
+- ✅ **Reconnection**: gRPC automatically handles reconnections on network failures
+- ⚠️ **Always call `shutdown()`**: Prevents resource leaks by properly closing connections
+- ⚠️ **One client per endpoint**: Create one ActorEdgeSystem per server endpoint
+- ⚠️ **Connection wait time**: TLS connections wait 500ms, plaintext 100ms for establishment
 
 ## 🧪 Testing
 

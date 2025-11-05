@@ -41,7 +41,8 @@
       "Bash(tree:*)",
       "Bash(pkill:*)",
       "Bash(openssl x509:*)",
-      "Bash(openssl verify:*)"
+      "Bash(openssl verify:*)",
+      "Bash(xargs kill:*)"
     ],
     "deny": []
   }

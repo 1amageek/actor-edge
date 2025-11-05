@@ -125,6 +125,9 @@ public actor ClientLifecycleManager {
         let task = Task<Void, Error> {
             do {
                 try await grpcClient.runConnections()
+            } catch is CancellationError {
+                // Expected during test cleanup
+                return
             } catch {
                 throw error
             }
@@ -137,9 +140,11 @@ public actor ClientLifecycleManager {
         try await Task.sleep(for: waitTime)
 
         // Create transport and system
+        // startConnections: false because we manage runConnections() manually in tests
         let transport = GRPCTransport(
             client: grpcClient,
-            metricsNamespace: configuration.metrics.namespace
+            metricsNamespace: configuration.metrics.namespace,
+            startConnections: false  // We already started it above
         )
 
         return ActorEdgeSystem(transport: transport, configuration: configuration)
@@ -147,7 +152,21 @@ public actor ClientLifecycleManager {
 
     /// Stop the client
     public func stop() async {
-        runConnectionsTask?.cancel()
+        // Cancel and wait for the task to complete
+        if let task = runConnectionsTask {
+            task.cancel()
+
+            // Wait for clean termination
+            do {
+                try await task.value
+            } catch is CancellationError {
+                // Expected
+            } catch {
+                // Log but continue cleanup
+                print("Warning: Connection task error during stop: \(error)")
+            }
+        }
+
         runConnectionsTask = nil
         grpcClient = nil
     }
